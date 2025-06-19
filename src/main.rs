@@ -1,6 +1,5 @@
 use std::env;
 use std::error::Error;
-use std::fmt::Display;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 
@@ -8,6 +7,7 @@ use futures::StreamExt;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, StreamBody};
 use hyper::body::{Bytes, Frame};
+use hyper::header::HeaderValue;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 enum Routes {
     Frontend,
+    Root,
 }
 
 type ServiceError = Box<dyn std::error::Error + Send + Sync>;
@@ -50,6 +51,8 @@ async fn router(
     router.add("/frontend/*name", Routes::Frontend);
     router.add("/frontend", Routes::Frontend);
     router.add("/frontend/", Routes::Frontend);
+    router.add("/*path", Routes::Root);
+    router.add("/", Routes::Root);
 
     let match_result = router.recognize(req.uri().path());
 
@@ -66,14 +69,28 @@ async fn router(
         Routes::Frontend => {
             serve_frontend(routes.params().find("name").unwrap_or("index.html")).await
         }
+        Routes::Root => redirect_to_frontend(routes.params().find("path").unwrap_or("")),
     }
+}
+
+fn redirect_to_frontend<T>(path: T) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
+where
+    T: AsRef<str> + AsRef<Path> + std::fmt::Display,
+{
+    let mut redirect = Response::new(empty());
+    *redirect.status_mut() = StatusCode::TEMPORARY_REDIRECT;
+    redirect.headers_mut().append(
+        "Location",
+        HeaderValue::from_str(format!("/frontend/{}", path).as_ref()).unwrap(),
+    );
+    Ok(redirect)
 }
 
 const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 128;
 const HOME_SUBDIR: &str = ".mwc";
 async fn serve_frontend<T>(name: T) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
 where
-    T: AsRef<str> + Display + AsRef<Path>,
+    T: AsRef<str> + AsRef<Path>,
 {
     let mut tgt_path = match env::home_dir() {
         Some(path) => path,
