@@ -1,7 +1,7 @@
 use std::env;
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use futures::StreamExt;
 use http_body_util::combinators::BoxBody;
@@ -13,7 +13,7 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use route_recognizer::Router;
-use tokio::fs::OpenOptions;
+use tokio::fs::{File, OpenOptions};
 use tokio::io::BufReader;
 use tokio::net::TcpListener;
 use tokio_util::io::ReaderStream;
@@ -66,9 +66,7 @@ async fn router(
     };
 
     match routes.handler() {
-        Routes::Frontend => {
-            serve_frontend(routes.params().find("name").unwrap_or("index.html")).await
-        }
+        Routes::Frontend => serve_frontend(routes.params().find("name")).await,
         Routes::Root => redirect_to_frontend(routes.params().find("path").unwrap_or("")),
     }
 }
@@ -86,44 +84,38 @@ where
     Ok(redirect)
 }
 
-const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 128;
-const HOME_SUBDIR: &str = ".mwc";
-async fn serve_frontend<T>(name: T) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
+const INDEX_FILE_NAME: &str = "index.html";
+async fn serve_frontend<'a, T>(
+    name: Option<T>,
+) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
 where
-    T: AsRef<Path>,
+    T: AsRef<Path> + From<&'a str> + Into<&'a str>,
 {
-    let mut tgt_path = match env::home_dir() {
-        Some(path) => path,
-        None => {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "could not resolve home path",
-            )));
+    let src_name = match name {
+        Some(name) => name,
+        None => INDEX_FILE_NAME.into(),
+    };
+    let (src_file, src_path) = match get_frontend_file(&src_name).await {
+        Ok((src_file, src_path)) => (src_file, src_path),
+        Err(err) => {
+            let name: &str = src_name.into();
+            if name == INDEX_FILE_NAME {
+                return Err(err);
+            }
+
+            match get_frontend_file(INDEX_FILE_NAME).await {
+                Ok((src_file, src_path)) => (src_file, src_path),
+                Err(err) => return Err(err),
+            }
         }
     };
-
-    tgt_path.push(HOME_SUBDIR);
-    tgt_path.push(name);
-
-    let src_file_open_result = OpenOptions::default()
-        .create(false)
-        .read(true)
-        .write(false)
-        .open(&tgt_path)
-        .await;
-
-    let src_file = match src_file_open_result {
-        Ok(src_file) => src_file,
-        Err(err) => return Err(Box::new(err)),
-    };
-
     let reader = BufReader::with_capacity(STREAM_CHUNK_SIZE, src_file);
     let reader_stream = ReaderStream::new(reader).map(|chunk| match chunk {
         Ok(bytes) => Ok(Frame::data(bytes)),
         Err(err) => Err(Box::new(err).into()),
     });
 
-    let media_type = mime_guess::from_path(&tgt_path);
+    let media_type = mime_guess::from_path(&src_path);
     let mime_type = media_type
         .first()
         .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
@@ -134,6 +126,43 @@ where
         HeaderValue::from_str(mime_type.as_ref()).unwrap(),
     );
     Ok(response)
+}
+
+const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 128;
+async fn get_frontend_file<T>(name: T) -> Result<(File, PathBuf), ServiceError>
+where
+    T: AsRef<Path>,
+{
+    let mut src_path = get_project_home_dir()?;
+    src_path.push(name);
+
+    let src_file_open_result = OpenOptions::default()
+        .create(false)
+        .read(true)
+        .write(false)
+        .open(&src_path)
+        .await;
+
+    match src_file_open_result {
+        Ok(src_file) => Ok((src_file, src_path)),
+        Err(err) => Err(Box::new(err)),
+    }
+}
+
+const HOME_SUBDIR: &str = ".mwc";
+fn get_project_home_dir() -> Result<PathBuf, ServiceError> {
+    let mut src_path = match env::home_dir() {
+        Some(path) => path,
+        None => {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "could not resolve home path",
+            )));
+        }
+    };
+
+    src_path.push(HOME_SUBDIR);
+    Ok(src_path)
 }
 
 fn empty() -> BoxBody<Bytes, ServiceError> {
