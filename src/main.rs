@@ -39,7 +39,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 enum Routes {
     Frontend,
-    Root,
 }
 
 type ServiceError = Box<dyn std::error::Error + Send + Sync>;
@@ -48,11 +47,8 @@ async fn router(
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
     let mut router = Router::new();
 
-    router.add("/frontend/*name", Routes::Frontend);
-    router.add("/frontend", Routes::Frontend);
-    router.add("/frontend/", Routes::Frontend);
-    router.add("/*path", Routes::Root);
-    router.add("/", Routes::Root);
+    router.add("/*path", Routes::Frontend);
+    router.add("/", Routes::Frontend);
 
     let match_result = router.recognize(req.uri().path());
 
@@ -66,22 +62,8 @@ async fn router(
     };
 
     match routes.handler() {
-        Routes::Frontend => serve_frontend(routes.params().find("name")).await,
-        Routes::Root => redirect_to_frontend(routes.params().find("path").unwrap_or("")),
+        Routes::Frontend => serve_frontend(routes.params().find("path")).await,
     }
-}
-
-fn redirect_to_frontend<T>(path: T) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
-where
-    T: AsRef<Path> + std::fmt::Display,
-{
-    let mut redirect = Response::new(empty());
-    *redirect.status_mut() = StatusCode::TEMPORARY_REDIRECT;
-    redirect.headers_mut().append(
-        "Location",
-        HeaderValue::from_str(format!("/frontend/{}", path).as_ref()).unwrap(),
-    );
-    Ok(redirect)
 }
 
 const INDEX_FILE_NAME: &str = "index.html";
