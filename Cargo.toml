@@ -11,3 +11,4 @@ hyper-util = { version = "0.1", features = ["full"] }
 route-recognizer = "0.3.1"
 tokio-util = "0.7.15"
 futures = "0.3.31"
+mime_guess = "2.0.5"

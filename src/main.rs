@@ -29,8 +29,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         let (stream, _) = listener.accept().await?;
 
-        let io = TokioIo::new(stream);
-        tokio::task::spawn(async move {
+        tokio::task::spawn(async {
+            let io = TokioIo::new(stream);
             let runner = auto::Builder::new(TokioExecutor::new());
             _ = runner.serve_connection(io, service_fn(router)).await;
         });
@@ -75,7 +75,7 @@ async fn router(
 
 fn redirect_to_frontend<T>(path: T) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
 where
-    T: AsRef<str> + AsRef<Path> + std::fmt::Display,
+    T: AsRef<Path> + std::fmt::Display,
 {
     let mut redirect = Response::new(empty());
     *redirect.status_mut() = StatusCode::TEMPORARY_REDIRECT;
@@ -90,7 +90,7 @@ const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 128;
 const HOME_SUBDIR: &str = ".mwc";
 async fn serve_frontend<T>(name: T) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
 where
-    T: AsRef<str> + AsRef<Path>,
+    T: AsRef<Path>,
 {
     let mut tgt_path = match env::home_dir() {
         Some(path) => path,
@@ -109,7 +109,7 @@ where
         .create(false)
         .read(true)
         .write(false)
-        .open(tgt_path)
+        .open(&tgt_path)
         .await;
 
     let src_file = match src_file_open_result {
@@ -122,7 +122,18 @@ where
         Ok(bytes) => Ok(Frame::data(bytes)),
         Err(err) => Err(Box::new(err).into()),
     });
-    Ok(Response::new(BoxBody::new(StreamBody::new(reader_stream))))
+
+    let media_type = mime_guess::from_path(&tgt_path);
+    let mime_type = media_type
+        .first()
+        .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
+
+    let mut response = Response::new(BoxBody::new(StreamBody::new(reader_stream)));
+    response.headers_mut().append(
+        "Content-Type",
+        HeaderValue::from_str(mime_type.as_ref()).unwrap(),
+    );
+    Ok(response)
 }
 
 fn empty() -> BoxBody<Bytes, ServiceError> {
