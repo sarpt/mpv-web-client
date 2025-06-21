@@ -1,4 +1,3 @@
-use std::env;
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -17,6 +16,7 @@ use tokio::io::BufReader;
 use tokio::net::TcpListener;
 use tokio_util::io::ReaderStream;
 
+use crate::home_dir::get_project_home_dir;
 use crate::server::common::ServiceError;
 use crate::server::router::get_route;
 
@@ -118,22 +118,6 @@ where
     Ok(src_file) => Ok((src_file, src_path)),
     Err(err) => Err(Box::new(err)),
   }
-}
-
-const HOME_SUBDIR: &str = ".mwc";
-fn get_project_home_dir() -> Result<PathBuf, ServiceError> {
-  let mut src_path = match env::home_dir() {
-    Some(path) => path,
-    None => {
-      return Err(Box::new(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "could not resolve home path",
-      )));
-    }
-  };
-
-  src_path.push(HOME_SUBDIR);
-  Ok(src_path)
 }
 
 fn empty() -> BoxBody<Bytes, ServiceError> {
