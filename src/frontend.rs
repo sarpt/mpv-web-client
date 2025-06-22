@@ -10,6 +10,7 @@ use crate::home_dir::get_project_home_dir;
 
 const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
 const TEMP_INFLATED_PKG_NAME: &str = "inflated.tar";
+
 pub fn extract_frontend_pkg<T>(name: T) -> Result<(), std::io::Error>
 where
   T: AsRef<Path>,
@@ -39,8 +40,9 @@ where
   drop(inflated_writer);
 
   temp_inflated_file_open_handle.seek(std::io::SeekFrom::Start(0))?;
+  let frontend_dir = get_frontend_dir()?;
   let mut tar_archive = Archive::new(temp_inflated_file_open_handle);
-  tar_archive.unpack(get_project_home_dir()?)?;
+  tar_archive.unpack(frontend_dir)?;
 
   remove_file(temp_inflated_path)?;
 
@@ -65,4 +67,12 @@ where
     Ok(src_file) => Ok((src_file, src_path)),
     Err(err) => Err(err),
   }
+}
+
+const FRONTEND_DIR: &str = "frontend";
+fn get_frontend_dir() -> Result<PathBuf, std::io::Error> {
+  let mut home_dir = get_project_home_dir()?;
+  home_dir.push(FRONTEND_DIR);
+
+  Ok(home_dir)
 }
