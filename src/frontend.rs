@@ -1,6 +1,6 @@
 use flate2::bufread::GzDecoder;
 use std::{
-  fs::remove_file,
+  fs::{remove_file, rename},
   io::{BufReader, BufWriter, Seek, copy},
   path::{Path, PathBuf},
 };
@@ -10,6 +10,7 @@ use crate::home_dir::get_project_home_dir;
 
 const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
 const TEMP_INFLATED_PKG_NAME: &str = "inflated.tar";
+const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
 
 pub fn extract_frontend_pkg<T>(name: T) -> Result<(), std::io::Error>
 where
@@ -45,6 +46,18 @@ where
   tar_archive.unpack(frontend_dir)?;
 
   remove_file(temp_inflated_path)?;
+
+  let manifest_file_path = {
+    let mut path = get_frontend_dir()?;
+    path.push(PKG_MANIFEST_NAME);
+    path
+  };
+  let new_manifest_file_path = {
+    let mut path = get_project_home_dir()?;
+    path.push(PKG_MANIFEST_NAME);
+    path
+  };
+  rename(manifest_file_path, new_manifest_file_path)?;
 
   Ok(())
 }
