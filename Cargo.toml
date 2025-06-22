@@ -14,3 +14,4 @@ futures = "0.3.31"
 mime_guess = "2.0.5"
 tar = "0.4.44"
 flate2 = "1.1.2"
+clap = { version = "4.5.40", features = ["derive"] }

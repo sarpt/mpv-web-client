@@ -14,7 +14,7 @@ use tokio::io::BufReader;
 use tokio::net::TcpListener;
 use tokio_util::io::ReaderStream;
 
-use crate::frontend::get_frontend_file;
+use crate::frontend::{INDEX_FILE_NAME, get_frontend_file};
 use crate::server::common::ServiceError;
 use crate::server::router::get_route;
 
@@ -57,7 +57,6 @@ async fn service(
 }
 
 const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
-const INDEX_FILE_NAME: &str = "index.html";
 async fn serve_frontend(
   name: Option<&str>,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
@@ -73,6 +72,8 @@ async fn serve_frontend(
         return Err(Box::new(err));
       }
 
+      // fallback to index file on unmatched paths
+      // required for BrowserRouter in mpv-web-frontend
       match get_frontend_file(INDEX_FILE_NAME).await {
         Ok((src_file, src_path)) => (src_file, src_path),
         Err(err) => return Err(Box::new(err)),
