@@ -1,9 +1,9 @@
 use std::error::Error;
 
-use crate::{pkgs::extract_frontend_pkg, server::serve};
+use crate::{frontend::extract_frontend_pkg, server::serve};
 
+mod frontend;
 mod home_dir;
-mod pkgs;
 mod server;
 
 #[tokio::main(flavor = "current_thread")]

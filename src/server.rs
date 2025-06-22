@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::path::{Path, PathBuf};
 
 use futures::StreamExt;
 use http_body_util::combinators::BoxBody;
@@ -11,12 +10,11 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
-use tokio::fs::{File, OpenOptions};
 use tokio::io::BufReader;
 use tokio::net::TcpListener;
 use tokio_util::io::ReaderStream;
 
-use crate::home_dir::get_project_home_dir;
+use crate::frontend::get_frontend_file;
 use crate::server::common::ServiceError;
 use crate::server::router::get_route;
 
@@ -58,6 +56,7 @@ async fn service(
   }
 }
 
+const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
 const INDEX_FILE_NAME: &str = "index.html";
 async fn serve_frontend(
   name: Option<&str>,
@@ -71,12 +70,12 @@ async fn serve_frontend(
     Err(err) => {
       let name: &str = src_name;
       if name == INDEX_FILE_NAME {
-        return Err(err);
+        return Err(Box::new(err));
       }
 
       match get_frontend_file(INDEX_FILE_NAME).await {
         Ok((src_file, src_path)) => (src_file, src_path),
-        Err(err) => return Err(err),
+        Err(err) => return Err(Box::new(err)),
       }
     }
   };
@@ -97,27 +96,6 @@ async fn serve_frontend(
     HeaderValue::from_str(mime_type.as_ref()).unwrap(),
   );
   Ok(response)
-}
-
-const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 128;
-async fn get_frontend_file<T>(name: T) -> Result<(File, PathBuf), ServiceError>
-where
-  T: AsRef<Path>,
-{
-  let mut src_path = get_project_home_dir()?;
-  src_path.push(name);
-
-  let src_file_open_result = OpenOptions::default()
-    .create(false)
-    .read(true)
-    .write(false)
-    .open(&src_path)
-    .await;
-
-  match src_file_open_result {
-    Ok(src_file) => Ok((src_file, src_path)),
-    Err(err) => Err(Box::new(err)),
-  }
 }
 
 fn empty() -> BoxBody<Bytes, ServiceError> {

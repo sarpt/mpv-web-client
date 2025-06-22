@@ -1,0 +1,68 @@
+use flate2::bufread::GzDecoder;
+use std::{
+  fs::remove_file,
+  io::{BufReader, BufWriter, Seek, copy},
+  path::{Path, PathBuf},
+};
+use tar::Archive;
+
+use crate::home_dir::get_project_home_dir;
+
+const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
+const TEMP_INFLATED_PKG_NAME: &str = "inflated.tar";
+pub fn extract_frontend_pkg<T>(name: T) -> Result<(), std::io::Error>
+where
+  T: AsRef<Path>,
+{
+  let mut src_path = get_project_home_dir()?;
+  src_path.push(&name);
+  let src_file_open_handle = std::fs::OpenOptions::new()
+    .create(false)
+    .read(true)
+    .write(false)
+    .open(&src_path)?;
+
+  let mut temp_inflated_path = get_project_home_dir()?;
+  temp_inflated_path.push(TEMP_INFLATED_PKG_NAME);
+  let mut temp_inflated_file_open_handle = std::fs::OpenOptions::new()
+    .create(true)
+    .truncate(true)
+    .read(true)
+    .write(true)
+    .open(&temp_inflated_path)?;
+
+  let src_pkg_reader = BufReader::with_capacity(STREAM_CHUNK_SIZE, src_file_open_handle);
+  let mut decoder = GzDecoder::new(src_pkg_reader);
+  let mut inflated_writer =
+    BufWriter::with_capacity(STREAM_CHUNK_SIZE, &temp_inflated_file_open_handle);
+  copy(&mut decoder, &mut inflated_writer)?;
+  drop(inflated_writer);
+
+  temp_inflated_file_open_handle.seek(std::io::SeekFrom::Start(0))?;
+  let mut tar_archive = Archive::new(temp_inflated_file_open_handle);
+  tar_archive.unpack(get_project_home_dir()?)?;
+
+  remove_file(temp_inflated_path)?;
+
+  Ok(())
+}
+
+pub async fn get_frontend_file<T>(name: T) -> Result<(tokio::fs::File, PathBuf), std::io::Error>
+where
+  T: AsRef<Path>,
+{
+  let mut src_path = get_project_home_dir()?;
+  src_path.push(name);
+
+  let src_file_open_result = tokio::fs::OpenOptions::default()
+    .create(false)
+    .read(true)
+    .write(false)
+    .open(&src_path)
+    .await;
+
+  match src_file_open_result {
+    Ok(src_file) => Ok((src_file, src_path)),
+    Err(err) => Err(err),
+  }
+}
