@@ -4,7 +4,7 @@ use std::{error::Error, path::PathBuf};
 use crate::{frontend::check_frontend_pkg, server::serve};
 
 mod frontend;
-mod home_dir;
+mod project_paths;
 mod server;
 
 #[derive(Parser, Debug)]
