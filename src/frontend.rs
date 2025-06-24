@@ -1,12 +1,12 @@
 use flate2::bufread::GzDecoder;
 use std::{
-  fs::{exists, remove_file, rename},
+  fs::{exists, remove_dir_all, remove_file, rename},
   io::{BufReader, BufWriter, Seek, copy},
   path::{Path, PathBuf},
 };
 use tar::Archive;
 
-use crate::home_dir::get_project_home_dir;
+use crate::project_paths::{FRONTEND_DIR, get_frontend_dir, get_project_home_dir, get_temp_dir};
 
 pub const INDEX_FILE_NAME: &str = "index.html";
 const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
@@ -39,8 +39,7 @@ where
   };
 
   {
-    let mut path =
-      get_project_home_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
+    let mut path = get_project_home_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
     path.push(PKG_MANIFEST_NAME);
     let manifest_exists = exists(path).map_err(|err| FrontendCheckErr::PkgInvalid(Some(err)))?;
     if !manifest_exists {
@@ -68,9 +67,12 @@ where
     .open(&src_path)
     .map_err(|err| FrontendCheckErr::PkgInvalid(Some(err)))?;
 
-  let mut temp_inflated_path =
-    get_project_home_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
-  temp_inflated_path.push(TEMP_INFLATED_PKG_NAME);
+  let temp_inflated_path = {
+    let mut temp_path = get_temp_dir();
+    temp_path.push(TEMP_INFLATED_PKG_NAME);
+    temp_path
+  };
+
   let mut temp_inflated_file_open_handle = std::fs::OpenOptions::new()
     .create(true)
     .truncate(true)
@@ -90,16 +92,25 @@ where
   temp_inflated_file_open_handle
     .seek(std::io::SeekFrom::Start(0))
     .map_err(FrontendCheckErr::HomeDirInaccessible)?;
-  let frontend_dir = get_frontend_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
+  let unpack_temp_dir = {
+    let mut dir = get_temp_dir();
+    dir.push(FRONTEND_DIR);
+    dir
+  };
+
   let mut tar_archive = Archive::new(temp_inflated_file_open_handle);
   tar_archive
-    .unpack(frontend_dir)
+    .unpack(&unpack_temp_dir)
     .map_err(|err| FrontendCheckErr::PkgInvalid(Some(err)))?;
 
   remove_file(temp_inflated_path).map_err(FrontendCheckErr::HomeDirInaccessible)?;
 
+  let frontend_dir = get_frontend_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
+  remove_dir_all(&frontend_dir).map_err(FrontendCheckErr::HomeDirInaccessible)?;
+  rename(unpack_temp_dir, &frontend_dir).map_err(FrontendCheckErr::HomeDirInaccessible)?;
+
   let manifest_file_path = {
-    let mut path = get_frontend_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
+    let mut path = frontend_dir.clone();
     path.push(PKG_MANIFEST_NAME);
     path
   };
@@ -132,12 +143,4 @@ where
     Ok(src_file) => Ok((src_file, src_path)),
     Err(err) => Err(err),
   }
-}
-
-const FRONTEND_DIR: &str = "frontend";
-fn get_frontend_dir() -> Result<PathBuf, std::io::Error> {
-  let mut home_dir = get_project_home_dir()?;
-  home_dir.push(FRONTEND_DIR);
-
-  Ok(home_dir)
 }
