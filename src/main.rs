@@ -18,51 +18,39 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
   let args = Args::parse();
 
-  verify_frontend(&args.pkg).await?;
+  verify_frontend(&args.pkg)
+    .await
+    .map_err(|err_msg| *Box::new(err_msg))?;
   serve().await
 }
 
-async fn verify_frontend(pkg_path: &Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+async fn verify_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
   let path_pkg = pkg_path.to_owned();
   let result = tokio::task::spawn_blocking(|| check_frontend_pkg(path_pkg)).await;
-  match result {
-    Ok(res) => {
-      if let Err(err) = res {
-        match err {
-          frontend::FrontendCheckErr::PkgInvalid(error) => {
-            return Err((*Box::new(format!("provided pkg file is invalid: {:?}", error))).into());
-          }
-          frontend::FrontendCheckErr::IndexNotFound(error) => {
-            return Err(
-              (*Box::new(format!(
-                "frontend cannot be served due to lack of entrypoint file: {:?}",
-                error
-              )))
-              .into(),
-            );
-          }
-          frontend::FrontendCheckErr::HomeDirInaccessible(error) => {
-            return Err(
-              (*Box::new(format!(
-                "the program could not read it's home directory: {}",
-                error
-              )))
-              .into(),
-            );
-          }
-          frontend::FrontendCheckErr::PkgNotProvided => {
-            return Err(
-              (*Box::new(
-                "frontend package has not been provided and there is no cached frontend package",
-              ))
-              .into(),
-            );
-          }
-        }
-      }
-    }
-    Err(e) => return Err(Box::new(e).into()),
-  }
+  let check_frontend_result = match result {
+    Ok(res) => res,
+    Err(e) => return Err(format!("issue with joining on blocking task {}", e)),
+  };
 
-  Ok(())
+  let frontend_check_err = match check_frontend_result {
+    Ok(_) => return Ok(()),
+    Err(e) => e,
+  };
+
+  match frontend_check_err {
+    frontend::FrontendCheckErr::PkgInvalid(error) => {
+      Err(format!("provided pkg file is invalid: {:?}", error))
+    }
+    frontend::FrontendCheckErr::IndexNotFound(error) => Err(format!(
+      "frontend cannot be served due to lack of entrypoint file: {:?}",
+      error
+    )),
+    frontend::FrontendCheckErr::HomeDirInaccessible(error) => Err(format!(
+      "the program could not read it's home directory: {}",
+      error
+    )),
+    frontend::FrontendCheckErr::PkgNotProvided => Err(
+      "frontend package has not been provided and there is no cached frontend package".to_owned(),
+    ),
+  }
 }
