@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::{error::Error, path::PathBuf};
 
-use crate::{frontend::check_frontend_pkg, server::serve};
+use crate::{frontend::check_frontend_pkg, project_paths::ensure_project_dirs, server::serve};
 
 mod frontend;
 mod project_paths;
@@ -18,6 +18,7 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
   let args = Args::parse();
 
+  ensure_project_dirs()?;
   verify_frontend(&args.pkg)
     .await
     .map_err(|err_msg| *Box::new(err_msg))?;
@@ -52,5 +53,8 @@ async fn verify_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
     frontend::FrontendCheckErr::PkgNotProvided => Err(
       "frontend package has not been provided and there is no cached frontend package".to_owned(),
     ),
+    frontend::FrontendCheckErr::PkgUnpackErr(error) => {
+      Err(format!("frontend package could not be unpacked: {}", error))
+    }
   }
 }

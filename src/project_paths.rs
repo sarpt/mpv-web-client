@@ -1,5 +1,6 @@
 use std::{
   env::{self},
+  fs::create_dir_all,
   path::PathBuf,
 };
 
@@ -32,4 +33,12 @@ pub fn get_temp_dir() -> PathBuf {
   path.push(PROJECT_SUBDIR);
 
   path
+}
+
+pub fn ensure_project_dirs() -> Result<(), std::io::Error> {
+  let temp_dir = get_temp_dir();
+  create_dir_all(temp_dir)?;
+
+  let frontend_dir = get_frontend_dir()?;
+  create_dir_all(frontend_dir)
 }

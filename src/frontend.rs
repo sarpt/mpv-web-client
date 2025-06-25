@@ -1,6 +1,6 @@
 use flate2::bufread::GzDecoder;
 use std::{
-  fs::{exists, remove_dir_all, remove_file, rename},
+  fs::{create_dir_all, exists, remove_file, rename},
   io::{BufReader, BufWriter, Seek, copy},
   path::{Path, PathBuf},
 };
@@ -13,6 +13,7 @@ const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
 pub enum FrontendCheckErr {
   IndexNotFound(Option<std::io::Error>),
   PkgNotProvided,
+  PkgUnpackErr(std::io::Error),
   PkgInvalid(Option<std::io::Error>),
   HomeDirInaccessible(std::io::Error),
 }
@@ -79,7 +80,7 @@ where
     .read(true)
     .write(true)
     .open(&temp_inflated_path)
-    .map_err(FrontendCheckErr::HomeDirInaccessible)?;
+    .map_err(FrontendCheckErr::PkgUnpackErr)?;
 
   let src_pkg_reader = BufReader::with_capacity(STREAM_CHUNK_SIZE, src_file_open_handle);
   let mut decoder = GzDecoder::new(src_pkg_reader);
@@ -105,10 +106,25 @@ where
 
   remove_file(temp_inflated_path).map_err(FrontendCheckErr::HomeDirInaccessible)?;
 
-  let frontend_dir = get_frontend_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
-  remove_dir_all(&frontend_dir).map_err(FrontendCheckErr::HomeDirInaccessible)?;
-  rename(unpack_temp_dir, &frontend_dir).map_err(FrontendCheckErr::HomeDirInaccessible)?;
+  let project_dir = get_project_home_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
+  let temp_project_dir = get_temp_dir();
+  for entry_result in walkdir::WalkDir::new(unpack_temp_dir) {
+    let entry = match entry_result {
+      Ok(e) => e,
+      Err(err) => return Err(FrontendCheckErr::PkgUnpackErr(err.into())),
+    };
 
+    let mut tgt_path = project_dir.clone();
+    let stripped_path = entry.path().strip_prefix(&temp_project_dir).unwrap();
+    tgt_path.push(stripped_path);
+    if entry.file_type().is_dir() {
+      create_dir_all(tgt_path).map_err(FrontendCheckErr::PkgUnpackErr)?;
+    } else if entry.file_type().is_file() {
+      std::fs::copy(entry.path(), &tgt_path).map_err(FrontendCheckErr::HomeDirInaccessible)?;
+    }
+  }
+
+  let frontend_dir = get_frontend_dir().map_err(FrontendCheckErr::HomeDirInaccessible)?;
   let manifest_file_path = {
     let mut path = frontend_dir.clone();
     path.push(PKG_MANIFEST_NAME);
