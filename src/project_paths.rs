@@ -20,7 +20,7 @@ pub fn get_project_home_dir() -> Result<PathBuf, std::io::Error> {
   Ok(src_path)
 }
 
-pub const FRONTEND_DIR: &str = "frontend";
+const FRONTEND_DIR: &str = "frontend";
 pub fn get_frontend_dir() -> Result<PathBuf, std::io::Error> {
   let mut home_dir = get_project_home_dir()?;
   home_dir.push(FRONTEND_DIR);
@@ -41,4 +41,10 @@ pub fn ensure_project_dirs() -> Result<(), std::io::Error> {
 
   let frontend_dir = get_frontend_dir()?;
   create_dir_all(frontend_dir)
+}
+
+pub fn get_frontend_temp_dir() -> PathBuf {
+  let mut dir = get_temp_dir();
+  dir.push(FRONTEND_DIR);
+  dir
 }

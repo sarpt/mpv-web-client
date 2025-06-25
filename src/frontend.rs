@@ -6,7 +6,9 @@ use std::{
 };
 use tar::Archive;
 
-use crate::project_paths::{FRONTEND_DIR, get_frontend_dir, get_project_home_dir, get_temp_dir};
+use crate::project_paths::{
+  get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir,
+};
 
 pub const INDEX_FILE_NAME: &str = "index.html";
 const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
@@ -92,36 +94,15 @@ where
   temp_inflated_file_open_handle
     .seek(std::io::SeekFrom::Start(0))
     .map_err(FrontendPkgErr::HomeDirInaccessible)?;
-  let unpack_temp_dir = {
-    let mut dir = get_temp_dir();
-    dir.push(FRONTEND_DIR);
-    dir
-  };
 
+  let unpack_temp_dir = get_frontend_temp_dir();
   let mut tar_archive = Archive::new(temp_inflated_file_open_handle);
   tar_archive
     .unpack(&unpack_temp_dir)
     .map_err(|err| FrontendPkgErr::PkgInvalid(Some(err)))?;
 
   remove_file(temp_inflated_path).map_err(FrontendPkgErr::HomeDirInaccessible)?;
-
-  let project_dir = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-  let temp_project_dir = get_temp_dir();
-  for entry_result in walkdir::WalkDir::new(unpack_temp_dir) {
-    let entry = match entry_result {
-      Ok(e) => e,
-      Err(err) => return Err(FrontendPkgErr::PkgUnpackErr(err.into())),
-    };
-
-    let mut tgt_path = project_dir.clone();
-    let stripped_path = entry.path().strip_prefix(&temp_project_dir).unwrap();
-    tgt_path.push(stripped_path);
-    if entry.file_type().is_dir() {
-      create_dir_all(tgt_path).map_err(FrontendPkgErr::PkgUnpackErr)?;
-    } else if entry.file_type().is_file() {
-      std::fs::copy(entry.path(), &tgt_path).map_err(FrontendPkgErr::HomeDirInaccessible)?;
-    }
-  }
+  move_frontend_pkg_to_home()?;
 
   let frontend_dir = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
   let manifest_file_path = {
@@ -158,4 +139,26 @@ where
     Ok(src_file) => Ok((src_file, src_path)),
     Err(err) => Err(err),
   }
+}
+
+fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
+  let frontend_temp_dir = get_frontend_temp_dir();
+  let project_dir = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+  for entry_result in walkdir::WalkDir::new(frontend_temp_dir) {
+    let entry = match entry_result {
+      Ok(e) => e,
+      Err(err) => return Err(FrontendPkgErr::PkgUnpackErr(err.into())),
+    };
+
+    let mut tgt_path = project_dir.clone();
+    let stripped_path = entry.path().strip_prefix(get_temp_dir()).unwrap();
+    tgt_path.push(stripped_path);
+    if entry.file_type().is_dir() {
+      create_dir_all(tgt_path).map_err(FrontendPkgErr::PkgUnpackErr)?;
+    } else if entry.file_type().is_file() {
+      std::fs::copy(entry.path(), tgt_path).map_err(FrontendPkgErr::HomeDirInaccessible)?;
+    }
+  }
+
+  Ok(())
 }
