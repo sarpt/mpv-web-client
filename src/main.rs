@@ -39,21 +39,21 @@ async fn verify_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
   };
 
   match frontend_check_err {
-    frontend::FrontendCheckErr::PkgInvalid(error) => {
+    frontend::FrontendPkgErr::PkgInvalid(error) => {
       Err(format!("provided pkg file is invalid: {:?}", error))
     }
-    frontend::FrontendCheckErr::IndexNotFound(error) => Err(format!(
+    frontend::FrontendPkgErr::IndexNotFound(error) => Err(format!(
       "frontend cannot be served due to lack of entrypoint file: {:?}",
       error
     )),
-    frontend::FrontendCheckErr::HomeDirInaccessible(error) => Err(format!(
+    frontend::FrontendPkgErr::HomeDirInaccessible(error) => Err(format!(
       "the program could not read it's home directory: {}",
       error
     )),
-    frontend::FrontendCheckErr::PkgNotProvided => Err(
+    frontend::FrontendPkgErr::PkgNotProvided => Err(
       "frontend package has not been provided and there is no cached frontend package".to_owned(),
     ),
-    frontend::FrontendCheckErr::PkgUnpackErr(error) => {
+    frontend::FrontendPkgErr::PkgUnpackErr(error) => {
       Err(format!("frontend package could not be unpacked: {}", error))
     }
   }
