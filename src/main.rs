@@ -45,7 +45,7 @@ async fn verify_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
 
   match frontend_check_err {
     frontend::FrontendPkgErr::PkgInvalid(error) => {
-      Err(format!("provided pkg file is invalid: {error:?}"))
+      Err(format!("provided pkg file is invalid: {error}"))
     }
     frontend::FrontendPkgErr::IndexNotFound(error) => Err(format!(
       "frontend cannot be served due to lack of entrypoint file: {error:?}"
