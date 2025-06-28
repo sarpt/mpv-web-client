@@ -1,4 +1,5 @@
 use flate2::bufread::GzDecoder;
+use log::warn;
 use std::{
   cmp::Ordering,
   fs::{create_dir_all, exists, remove_file},
@@ -18,6 +19,8 @@ use crate::{
 mod pkg_manifest;
 
 pub const INDEX_FILE_NAME: &str = "index.html";
+
+#[derive(Debug)]
 pub enum FrontendPkgErr {
   IndexNotFound(Option<std::io::Error>),
   PkgNotProvided,
@@ -164,8 +167,13 @@ fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
 
 fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
   let temp_manifest = parse_temp_package_manifest()?;
-  // TODO: lack of manifest in project home or incorrect manifest file should not be a fatal error
-  let project_manifest = parse_project_package_manifest()?;
+  let project_manifest = match parse_project_package_manifest() {
+    Ok(m) => m,
+    Err(err) => {
+      warn!("could not parse existing frontend package manifest: {err:?}");
+      return Ok(());
+    }
+  };
   let compare_res = compare_package_manifests(&temp_manifest, &project_manifest)?;
 
   match compare_res {
