@@ -39,8 +39,8 @@ pub fn ensure_project_dirs() -> Result<(), std::io::Error> {
   let temp_dir = get_temp_dir();
   create_dir_all(temp_dir)?;
 
-  let frontend_dir = get_frontend_dir()?;
-  create_dir_all(frontend_dir)
+  let project_dir = get_project_home_dir()?;
+  create_dir_all(project_dir)
 }
 
 pub fn get_frontend_temp_dir() -> PathBuf {

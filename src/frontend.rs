@@ -1,17 +1,21 @@
 use flate2::bufread::GzDecoder;
 use std::{
-  fs::{create_dir_all, exists, remove_file, rename},
+  fs::{create_dir_all, exists, remove_file},
   io::{BufReader, BufWriter, Seek, copy},
   path::{Path, PathBuf},
 };
 use tar::Archive;
 
-use crate::project_paths::{
-  get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir,
+use crate::{
+  frontend::pkg_manifest::{
+    PKG_MANIFEST_NAME, move_manifest_to_project_home, parse_temp_package_manifest,
+  },
+  project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
 };
 
+mod pkg_manifest;
+
 pub const INDEX_FILE_NAME: &str = "index.html";
-const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
 pub enum FrontendPkgErr {
   IndexNotFound(Option<std::io::Error>),
   PkgNotProvided,
@@ -26,6 +30,9 @@ where
 {
   if let Some(path) = &pkg_path {
     extract_frontend_pkg(path)?;
+    _ = parse_temp_package_manifest()?;
+    move_frontend_pkg_to_home()?;
+    move_manifest_to_project_home()?;
   }
 
   {
@@ -100,23 +107,7 @@ where
   tar_archive
     .unpack(&unpack_temp_dir)
     .map_err(|err| FrontendPkgErr::PkgInvalid(Some(err)))?;
-
   remove_file(temp_inflated_path).map_err(FrontendPkgErr::HomeDirInaccessible)?;
-  move_frontend_pkg_to_home()?;
-
-  let frontend_dir = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-  let manifest_file_path = {
-    let mut path = frontend_dir.clone();
-    path.push(PKG_MANIFEST_NAME);
-    path
-  };
-  let new_manifest_file_path = {
-    let mut path = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-    path.push(PKG_MANIFEST_NAME);
-    path
-  };
-  rename(manifest_file_path, new_manifest_file_path)
-    .map_err(FrontendPkgErr::HomeDirInaccessible)?;
 
   Ok(())
 }
