@@ -1,5 +1,6 @@
 use flate2::bufread::GzDecoder;
 use std::{
+  cmp::Ordering,
   fs::{create_dir_all, exists, remove_file},
   io::{BufReader, BufWriter, Seek, copy},
   path::{Path, PathBuf},
@@ -8,7 +9,8 @@ use tar::Archive;
 
 use crate::{
   frontend::pkg_manifest::{
-    PKG_MANIFEST_NAME, move_manifest_to_project_home, parse_temp_package_manifest,
+    PKG_MANIFEST_NAME, compare_package_manifests, move_manifest_to_project_home,
+    parse_project_package_manifest, parse_temp_package_manifest,
   },
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
 };
@@ -21,6 +23,8 @@ pub enum FrontendPkgErr {
   PkgNotProvided,
   PkgUnpackErr(std::io::Error),
   PkgInvalid(Option<std::io::Error>),
+  PkgOutdated(String, String),
+  ManifestInvalid(String),
   HomeDirInaccessible(std::io::Error),
 }
 
@@ -30,7 +34,7 @@ where
 {
   if let Some(path) = &pkg_path {
     extract_frontend_pkg(path)?;
-    _ = parse_temp_package_manifest()?;
+    check_new_pkg_manifest_against_existing_one()?;
     move_frontend_pkg_to_home()?;
     move_manifest_to_project_home()?;
   }
@@ -152,4 +156,18 @@ fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   }
 
   Ok(())
+}
+
+fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
+  let temp_manifest = parse_temp_package_manifest()?;
+  let project_manifest = parse_project_package_manifest()?;
+  let compare_res = compare_package_manifests(&temp_manifest, &project_manifest)?;
+
+  match compare_res {
+    Ordering::Less => Err(FrontendPkgErr::PkgOutdated(
+      temp_manifest.version_info.version,
+      project_manifest.version_info.version,
+    )),
+    Ordering::Equal | Ordering::Greater => Ok(()),
+  }
 }
