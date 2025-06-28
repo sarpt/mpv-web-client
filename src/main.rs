@@ -59,5 +59,11 @@ async fn verify_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
     frontend::FrontendPkgErr::PkgUnpackErr(error) => {
       Err(format!("frontend package could not be unpacked: {error}"))
     }
+    frontend::FrontendPkgErr::PkgOutdated(tmp_version, home_version) => Err(format!(
+      "provided frontend package has outdated version \"{tmp_version}\" compared to currently installed version \"{home_version}\""
+    )),
+    frontend::FrontendPkgErr::ManifestInvalid(msg) => Err(format!(
+      "frontend package manifest is in incorrect format: {msg}"
+    )),
   }
 }
