@@ -22,7 +22,7 @@ pub enum FrontendPkgErr {
   IndexNotFound(Option<std::io::Error>),
   PkgNotProvided,
   PkgUnpackErr(std::io::Error),
-  PkgInvalid(Option<std::io::Error>),
+  PkgInvalid(String),
   PkgOutdated(String, String),
   ManifestInvalid(String),
   HomeDirInaccessible(std::io::Error),
@@ -55,12 +55,15 @@ where
   {
     let mut path = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
     path.push(PKG_MANIFEST_NAME);
-    let manifest_exists = exists(path).map_err(|err| FrontendPkgErr::PkgInvalid(Some(err)))?;
+    let manifest_exists =
+      exists(path).map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
     if !manifest_exists {
       if pkg_path.is_none() {
         return Err(FrontendPkgErr::PkgNotProvided);
       } else {
-        return Err(FrontendPkgErr::PkgInvalid(None));
+        return Err(FrontendPkgErr::PkgInvalid(
+          "manifest file does not exist in project home directory".to_owned(),
+        ));
       }
     }
   };
@@ -79,7 +82,7 @@ where
     .read(true)
     .write(false)
     .open(&src_path)
-    .map_err(|err| FrontendPkgErr::PkgInvalid(Some(err)))?;
+    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
 
   let temp_inflated_path = {
     let mut temp_path = get_temp_dir();
@@ -99,7 +102,8 @@ where
   let mut decoder = GzDecoder::new(src_pkg_reader);
   let mut inflated_writer =
     BufWriter::with_capacity(STREAM_CHUNK_SIZE, &temp_inflated_file_open_handle);
-  copy(&mut decoder, &mut inflated_writer).map_err(|err| FrontendPkgErr::PkgInvalid(Some(err)))?;
+  copy(&mut decoder, &mut inflated_writer)
+    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
   drop(inflated_writer);
 
   temp_inflated_file_open_handle
@@ -110,7 +114,7 @@ where
   let mut tar_archive = Archive::new(temp_inflated_file_open_handle);
   tar_archive
     .unpack(&unpack_temp_dir)
-    .map_err(|err| FrontendPkgErr::PkgInvalid(Some(err)))?;
+    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
   remove_file(temp_inflated_path).map_err(FrontendPkgErr::HomeDirInaccessible)?;
 
   Ok(())
@@ -160,6 +164,7 @@ fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
 
 fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
   let temp_manifest = parse_temp_package_manifest()?;
+  // TODO: lack of manifest in project home or incorrect manifest file should not be a fatal error
   let project_manifest = parse_project_package_manifest()?;
   let compare_res = compare_package_manifests(&temp_manifest, &project_manifest)?;
 

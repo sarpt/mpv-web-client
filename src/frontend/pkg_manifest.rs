@@ -46,9 +46,9 @@ where
   let mut toml_content = String::new();
   package_file
     .read_to_string(&mut toml_content)
-    .map_err(|_| FrontendPkgErr::PkgInvalid(None))?;
-  let manifest: Manifest =
-    toml::from_str(toml_content.as_ref()).map_err(|_| FrontendPkgErr::PkgInvalid(None))?;
+    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
+  let manifest: Manifest = toml::from_str(toml_content.as_ref())
+    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
 
   Ok(manifest)
 }
