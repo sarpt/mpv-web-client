@@ -1,5 +1,5 @@
 use clap::Parser;
-use log::debug;
+use log::{debug, error, info};
 use std::{error::Error, path::PathBuf, time::SystemTime};
 
 use crate::{
@@ -41,7 +41,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
   let path_pkg = pkg_path.to_owned();
 
-  check_latest_remote_release().await?;
+  if path_pkg.is_none() {
+    match check_latest_remote_release().await {
+      Ok(release) => {
+        info!("the latest version is \"{}\"", release.tag_name);
+      }
+      Err(err) => {
+        error!("check for the latest version failed: {err}");
+      }
+    };
+  }
 
   let result = tokio::task::spawn_blocking(|| check_frontend_pkg(path_pkg)).await;
   let check_frontend_result = match result {
