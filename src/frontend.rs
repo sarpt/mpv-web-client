@@ -1,5 +1,5 @@
 use flate2::bufread::GzDecoder;
-use log::{info, warn};
+use log::warn;
 use serde::Deserialize;
 use std::{
   cmp::Ordering,
@@ -187,15 +187,22 @@ fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
 }
 
 #[derive(Deserialize)]
-struct Release {
-  tag_name: String,
-  name: String,
-  body: String,
+pub struct Asset {
+  pub browser_download_url: String,
+  pub content_type: String,
+}
+
+#[derive(Deserialize)]
+pub struct Release {
+  pub tag_name: String,
+  pub name: String,
+  pub body: String,
+  pub assets: Vec<Asset>,
 }
 
 const LATEST_RELEASES_URL: &str =
   "https://api.github.com/repos/sarpt/mpv-web-front/releases/latest";
-pub async fn check_latest_remote_release() -> Result<(), String> {
+pub async fn check_latest_remote_release() -> Result<Release, String> {
   let client = reqwest::Client::new();
   let request = client
     .get(LATEST_RELEASES_URL)
@@ -217,6 +224,5 @@ pub async fn check_latest_remote_release() -> Result<(), String> {
     .map_err(|err| err.to_string())?;
 
   let response: Release = serde_json::from_str(&response_text).map_err(|err| err.to_string())?;
-  info!("the latest version is \"{}\"", response.tag_name);
-  Ok(())
+  Ok(response)
 }
