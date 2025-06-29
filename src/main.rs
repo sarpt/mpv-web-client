@@ -1,7 +1,12 @@
 use clap::Parser;
+use log::debug;
 use std::{error::Error, path::PathBuf, time::SystemTime};
 
-use crate::{frontend::check_frontend_pkg, project_paths::ensure_project_dirs, server::serve};
+use crate::{
+  frontend::{check_frontend_pkg, check_latest_remote_release},
+  project_paths::ensure_project_dirs,
+  server::serve,
+};
 
 mod frontend;
 mod project_paths;
@@ -24,16 +29,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
   let args = Args::parse();
 
   init_logging()?;
+  debug!("version {}", env!("CARGO_PKG_VERSION"));
 
   ensure_project_dirs()?;
-  verify_frontend(&args.pkg)
+  init_frontend(&args.pkg)
     .await
     .map_err(|err_msg| *Box::new(err_msg))?;
   serve().await
 }
 
-async fn verify_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
+async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
   let path_pkg = pkg_path.to_owned();
+
+  check_latest_remote_release().await?;
+
   let result = tokio::task::spawn_blocking(|| check_frontend_pkg(path_pkg)).await;
   let check_frontend_result = match result {
     Ok(res) => res,
