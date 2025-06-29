@@ -1,5 +1,6 @@
 use flate2::bufread::GzDecoder;
-use log::warn;
+use log::{info, warn};
+use serde::Deserialize;
 use std::{
   cmp::Ordering,
   fs::{create_dir_all, exists, remove_file},
@@ -183,4 +184,39 @@ fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
     )),
     Ordering::Equal | Ordering::Greater => Ok(()),
   }
+}
+
+#[derive(Deserialize)]
+struct Release {
+  tag_name: String,
+  name: String,
+  body: String,
+}
+
+const LATEST_RELEASES_URL: &str =
+  "https://api.github.com/repos/sarpt/mpv-web-front/releases/latest";
+pub async fn check_latest_remote_release() -> Result<(), String> {
+  let client = reqwest::Client::new();
+  let request = client
+    .get(LATEST_RELEASES_URL)
+    .header(
+      "User-Agent",
+      format!("mpv-web-client/{}", env!("CARGO_PKG_VERSION")),
+    )
+    .header("Accept", "application/vnd.github+json")
+    .header("GitHub-Api-Version", "2022-11-28")
+    .build()
+    .map_err(|err| err.to_string())?;
+
+  let response_text = client
+    .execute(request)
+    .await
+    .map_err(|err| err.to_string())?
+    .text()
+    .await
+    .map_err(|err| err.to_string())?;
+
+  let response: Release = serde_json::from_str(&response_text).map_err(|err| err.to_string())?;
+  info!("the latest version is \"{}\"", response.tag_name);
+  Ok(())
 }
