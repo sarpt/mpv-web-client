@@ -12,6 +12,7 @@ use crate::project_paths::get_temp_dir;
 pub struct Asset {
   pub browser_download_url: String,
   pub content_type: String,
+  pub size: usize,
 }
 
 #[derive(Deserialize)]
@@ -54,19 +55,17 @@ pub async fn fetch_remote_frontend_package_release(release: &Release) -> Result<
   let mut target_path = get_temp_dir();
   target_path.push(&release.name);
 
-  let package_url = match release.assets.iter().find_map(|asset| {
-    if is_asset_a_frontend_package(asset) {
-      Some(&asset.browser_download_url)
-    } else {
-      None
-    }
-  }) {
+  let asset = match release
+    .assets
+    .iter()
+    .find(|asset| is_asset_a_frontend_package(asset))
+  {
     Some(url) => url,
     None => return Err("release doesn't have any frontend package assets".to_owned()),
   };
 
   let request = client
-    .get(package_url)
+    .get(&asset.browser_download_url)
     .header(
       "User-Agent",
       format!("mpv-web-client/{}", env!("CARGO_PKG_VERSION")),
@@ -91,17 +90,26 @@ pub async fn fetch_remote_frontend_package_release(release: &Release) -> Result<
     .await
     .map_err(|err| err.to_string())?;
 
+  let mut total_written: usize = 0;
   while let Some(chunk) = response.chunk().await.map_err(|err| err.to_string())? {
-    let _ = tgt_file_wrtier
+    let written = tgt_file_wrtier
       .write(&chunk)
       .await
       .map_err(|err| err.to_string())?;
+    total_written += written;
   }
 
   let _ = tgt_file_wrtier
     .shutdown()
     .await
     .map_err(|err| err.to_string());
+
+  if total_written != asset.size {
+    return Err(format!(
+      "expected package size of {} bytes but only {} bytes written",
+      &asset.size, &total_written
+    ));
+  }
 
   Ok(target_path)
 }
