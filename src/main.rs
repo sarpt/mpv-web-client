@@ -3,7 +3,9 @@ use log::{debug, error, info};
 use std::{error::Error, path::PathBuf, time::SystemTime};
 
 use crate::{
-  frontend::{check_frontend_pkg, check_latest_remote_release},
+  frontend::{
+    check_frontend_pkg, check_latest_remote_release, fetch_remote_frontend_package_release,
+  },
   project_paths::ensure_project_dirs,
   server::serve,
 };
@@ -39,12 +41,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
-  let path_pkg = pkg_path.to_owned();
+  let mut path_pkg = pkg_path.to_owned();
 
   if path_pkg.is_none() {
     match check_latest_remote_release().await {
       Ok(release) => {
         info!("the latest version is \"{}\"", release.tag_name);
+        path_pkg = Some(fetch_remote_frontend_package_release(&release).await?);
       }
       Err(err) => {
         error!("check for the latest version failed: {err}");
