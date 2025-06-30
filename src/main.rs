@@ -4,7 +4,8 @@ use std::{error::Error, path::PathBuf, time::SystemTime};
 
 use crate::{
   frontend::{
-    check_frontend_pkg, check_latest_remote_release, fetch_remote_frontend_package_release,
+    check_frontend_pkg,
+    releases::{check_latest_remote_release, fetch_remote_frontend_package_release},
   },
   project_paths::ensure_project_dirs,
   server::serve,
