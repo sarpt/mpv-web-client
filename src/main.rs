@@ -48,7 +48,13 @@ async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
     match check_latest_remote_release().await {
       Ok(release) => {
         info!("the latest version is \"{}\"", release.tag_name);
-        path_pkg = Some(fetch_remote_frontend_package_release(&release).await?);
+        path_pkg = match fetch_remote_frontend_package_release(&release).await {
+          Ok(path_pkg) => Some(path_pkg),
+          Err(err) => {
+            error!("fetch of remote frontend package failed: {err}");
+            None
+          }
+        }
       }
       Err(err) => {
         error!("check for the latest version failed: {err}");
