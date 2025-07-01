@@ -2,6 +2,7 @@ use flate2::bufread::GzDecoder;
 use log::warn;
 use std::{
   cmp::Ordering,
+  fmt::Display,
   fs::{create_dir_all, exists, remove_file},
   io::{BufReader, BufWriter, Seek, copy},
   path::{Path, PathBuf},
@@ -20,17 +21,6 @@ mod pkg_manifest;
 pub mod releases;
 
 pub const INDEX_FILE_NAME: &str = "index.html";
-
-#[derive(Debug)]
-pub enum FrontendPkgErr {
-  IndexNotFound(Option<std::io::Error>),
-  PkgNotProvided,
-  PkgUnpackErr(std::io::Error),
-  PkgInvalid(String),
-  PkgOutdated(String, String),
-  ManifestInvalid(String),
-  HomeDirInaccessible(std::io::Error),
-}
 
 pub fn check_frontend_pkg<T>(pkg_path: Option<T>) -> Result<(), FrontendPkgErr>
 where
@@ -171,7 +161,7 @@ fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
   let project_manifest = match parse_project_package_manifest() {
     Ok(m) => m,
     Err(err) => {
-      warn!("could not parse existing frontend package manifest: {err:?}");
+      warn!("could not parse existing frontend package manifest: {err}");
       return Ok(());
     }
   };
@@ -183,5 +173,44 @@ fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
       project_manifest.version_info.version,
     )),
     Ordering::Equal | Ordering::Greater => Ok(()),
+  }
+}
+
+pub enum FrontendPkgErr {
+  IndexNotFound(Option<std::io::Error>),
+  PkgNotProvided,
+  PkgUnpackErr(std::io::Error),
+  PkgInvalid(String),
+  PkgOutdated(String, String),
+  ManifestInvalid(String),
+  HomeDirInaccessible(std::io::Error),
+}
+
+impl Display for FrontendPkgErr {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      FrontendPkgErr::PkgInvalid(err) => write!(f, "provided pkg file is invalid: {err}"),
+      FrontendPkgErr::IndexNotFound(error) => write!(
+        f,
+        "frontend cannot be served due to lack of entrypoint file: {error:?}"
+      ),
+      FrontendPkgErr::HomeDirInaccessible(error) => {
+        write!(f, "the program could not read it's home directory: {error}")
+      }
+      FrontendPkgErr::PkgNotProvided => write!(
+        f,
+        "frontend package has not been provided and there is no cached frontend package",
+      ),
+      FrontendPkgErr::PkgUnpackErr(error) => {
+        write!(f, "frontend package could not be unpacked: {error}")
+      }
+      FrontendPkgErr::PkgOutdated(tmp_version, home_version) => write!(
+        f,
+        "provided frontend package has outdated version \"{tmp_version}\" compared to currently installed version \"{home_version}\""
+      ),
+      FrontendPkgErr::ManifestInvalid(msg) => {
+        write!(f, "frontend package manifest is in incorrect format: {msg}")
+      }
+    }
   }
 }

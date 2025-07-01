@@ -68,33 +68,9 @@ async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
     Err(e) => return Err(format!("issue with joining on blocking task {e}")),
   };
 
-  let frontend_check_err = match check_frontend_result {
-    Ok(_) => return Ok(()),
-    Err(e) => e,
-  };
-
-  match frontend_check_err {
-    frontend::FrontendPkgErr::PkgInvalid(error) => {
-      Err(format!("provided pkg file is invalid: {error}"))
-    }
-    frontend::FrontendPkgErr::IndexNotFound(error) => Err(format!(
-      "frontend cannot be served due to lack of entrypoint file: {error:?}"
-    )),
-    frontend::FrontendPkgErr::HomeDirInaccessible(error) => Err(format!(
-      "the program could not read it's home directory: {error}"
-    )),
-    frontend::FrontendPkgErr::PkgNotProvided => Err(
-      "frontend package has not been provided and there is no cached frontend package".to_owned(),
-    ),
-    frontend::FrontendPkgErr::PkgUnpackErr(error) => {
-      Err(format!("frontend package could not be unpacked: {error}"))
-    }
-    frontend::FrontendPkgErr::PkgOutdated(tmp_version, home_version) => Err(format!(
-      "provided frontend package has outdated version \"{tmp_version}\" compared to currently installed version \"{home_version}\""
-    )),
-    frontend::FrontendPkgErr::ManifestInvalid(msg) => Err(format!(
-      "frontend package manifest is in incorrect format: {msg}"
-    )),
+  match check_frontend_result {
+    Ok(_) => Ok(()),
+    Err(err) => Err(format!("frontend init failed: {err}")),
   }
 }
 
