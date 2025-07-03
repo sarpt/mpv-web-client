@@ -1,11 +1,11 @@
 use clap::Parser;
-use log::{debug, error, info};
+use log::{debug, error};
 use std::{error::Error, path::PathBuf, time::SystemTime};
 
 use crate::{
   frontend::{
-    check_frontend_pkg,
-    releases::{check_latest_remote_release, fetch_remote_frontend_package_release},
+    check_frontend_pkg, newer_remote_release_available,
+    releases::fetch_remote_frontend_package_release,
   },
   project_paths::ensure_project_dirs,
   server::serve,
@@ -45,9 +45,8 @@ async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
   let mut path_pkg = pkg_path.to_owned();
 
   if path_pkg.is_none() {
-    match check_latest_remote_release().await {
+    match newer_remote_release_available().await {
       Ok(release) => {
-        info!("the latest version is \"{}\"", release.tag_name);
         path_pkg = match fetch_remote_frontend_package_release(&release).await {
           Ok(path_pkg) => Some(path_pkg),
           Err(err) => {
@@ -57,7 +56,7 @@ async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
         }
       }
       Err(err) => {
-        error!("check for the latest version failed: {err}");
+        error!("{err}");
       }
     };
   }

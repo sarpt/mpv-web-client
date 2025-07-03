@@ -1,5 +1,5 @@
 use flate2::bufread::GzDecoder;
-use log::warn;
+use log::{info, warn};
 use std::{
   cmp::Ordering,
   fmt::Display,
@@ -10,9 +10,12 @@ use std::{
 use tar::Archive;
 
 use crate::{
-  frontend::pkg_manifest::{
-    PKG_MANIFEST_NAME, compare_package_manifests, move_manifest_to_project_home,
-    parse_project_package_manifest, parse_temp_package_manifest,
+  frontend::{
+    pkg_manifest::{
+      PKG_MANIFEST_NAME, compare_package_versions, move_manifest_to_project_home,
+      parse_project_package_manifest, parse_temp_package_manifest,
+    },
+    releases::{Release, ReleaseFetchErr, check_latest_remote_release},
   },
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
 };
@@ -134,6 +137,16 @@ where
   }
 }
 
+pub async fn newer_remote_release_available() -> Result<Release, FrontendPkgErr> {
+  let release = check_latest_remote_release()
+    .await
+    .map_err(FrontendPkgErr::RemoteReleaseCheckFailure)?;
+
+  info!("the latest version is \"{}\"", release.tag_name);
+  check_release_against_existing_one(&release)?;
+  Ok(release)
+}
+
 fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   let frontend_temp_dir = get_frontend_temp_dir();
   let project_dir = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
@@ -156,6 +169,26 @@ fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   Ok(())
 }
 
+fn check_release_against_existing_one(release: &Release) -> Result<(), FrontendPkgErr> {
+  let project_manifest = match parse_project_package_manifest() {
+    Ok(m) => m,
+    Err(err) => {
+      warn!("could not parse existing frontend package manifest: {err}");
+      return Ok(());
+    }
+  };
+  let compare_res =
+    compare_package_versions(&release.name, &project_manifest.version_info.version)?;
+
+  match compare_res {
+    Ordering::Less => Err(FrontendPkgErr::PkgOutdated(
+      release.name.clone(),
+      project_manifest.version_info.version,
+    )),
+    Ordering::Equal | Ordering::Greater => Ok(()),
+  }
+}
+
 fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
   let temp_manifest = parse_temp_package_manifest()?;
   let project_manifest = match parse_project_package_manifest() {
@@ -165,7 +198,10 @@ fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
       return Ok(());
     }
   };
-  let compare_res = compare_package_manifests(&temp_manifest, &project_manifest)?;
+  let compare_res = compare_package_versions(
+    &temp_manifest.version_info.version,
+    &project_manifest.version_info.version,
+  )?;
 
   match compare_res {
     Ordering::Less => Err(FrontendPkgErr::PkgOutdated(
@@ -184,6 +220,7 @@ pub enum FrontendPkgErr {
   PkgOutdated(String, String),
   ManifestInvalid(String),
   HomeDirInaccessible(std::io::Error),
+  RemoteReleaseCheckFailure(ReleaseFetchErr),
 }
 
 impl Display for FrontendPkgErr {
@@ -210,6 +247,9 @@ impl Display for FrontendPkgErr {
       ),
       FrontendPkgErr::ManifestInvalid(msg) => {
         write!(f, "frontend package manifest is in incorrect format: {msg}")
+      }
+      FrontendPkgErr::RemoteReleaseCheckFailure(err) => {
+        write!(f, "check for the latest version failed: {err}")
       }
     }
   }
