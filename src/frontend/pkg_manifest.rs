@@ -71,32 +71,24 @@ pub fn move_manifest_to_project_home() -> Result<(), FrontendPkgErr> {
 const VERSION_SEMVER_SEPARATOR: &str = ".";
 // TODO: can't be PartialOrd/Ord since parsing of Semver may fail and None will not handle that correctly.
 // Create a Semver type that can be deserialized by serde and evaluated at parsing time?
-pub fn compare_package_manifests(
-  a_pkg: &Manifest,
-  b_pkg: &Manifest,
+pub fn compare_package_versions(
+  a_version: &String,
+  b_version: &String,
 ) -> Result<Ordering, FrontendPkgErr> {
-  if a_pkg.version_info == b_pkg.version_info {
+  if a_version == b_version {
     return Ok(Ordering::Equal);
   };
 
-  let split_a_semver = a_pkg
-    .version_info
-    .version
-    .split(VERSION_SEMVER_SEPARATOR)
-    .map(|chunk| {
-      chunk.parse::<usize>().map_err(|_| {
-        FrontendPkgErr::ManifestInvalid("could not parse version as semver".to_owned())
-      })
-    });
-  let mut split_b_semver = b_pkg
-    .version_info
-    .version
-    .split(VERSION_SEMVER_SEPARATOR)
-    .map(|chunk| {
-      chunk.parse::<usize>().map_err(|_| {
-        FrontendPkgErr::ManifestInvalid("could not parse version as semver".to_owned())
-      })
-    });
+  let split_a_semver = a_version.split(VERSION_SEMVER_SEPARATOR).map(|chunk| {
+    chunk
+      .parse::<usize>()
+      .map_err(|_| FrontendPkgErr::ManifestInvalid("could not parse version as semver".to_owned()))
+  });
+  let mut split_b_semver = b_version.split(VERSION_SEMVER_SEPARATOR).map(|chunk| {
+    chunk
+      .parse::<usize>()
+      .map_err(|_| FrontendPkgErr::ManifestInvalid("could not parse version as semver".to_owned()))
+  });
   for (idx, a_semver_chunk_result) in split_a_semver.enumerate() {
     let a_semver_chunk = a_semver_chunk_result?;
     match split_b_semver.nth(idx) {
