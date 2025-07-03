@@ -1,7 +1,6 @@
 use flate2::bufread::GzDecoder;
 use log::{info, warn};
 use std::{
-  cmp::Ordering,
   fmt::Display,
   fs::{create_dir_all, exists, remove_file},
   io::{BufReader, BufWriter, Seek, copy},
@@ -12,8 +11,8 @@ use tar::Archive;
 use crate::{
   frontend::{
     pkg_manifest::{
-      PKG_MANIFEST_NAME, compare_package_versions, move_manifest_to_project_home,
-      parse_project_package_manifest, parse_temp_package_manifest,
+      PKG_MANIFEST_NAME, Semver, move_manifest_to_project_home, parse_project_package_manifest,
+      parse_temp_package_manifest,
     },
     releases::{Release, ReleaseFetchErr, check_latest_remote_release},
   },
@@ -177,16 +176,14 @@ fn check_release_against_existing_one(release: &Release) -> Result<(), FrontendP
       return Ok(());
     }
   };
-  let compare_res =
-    compare_package_versions(&release.name, &project_manifest.version_info.version)?;
-
-  match compare_res {
-    Ordering::Less => Err(FrontendPkgErr::PkgOutdated(
+  let release_semver = Semver::try_from(&release.name).map_err(FrontendPkgErr::ManifestInvalid)?;
+  if release_semver < project_manifest.version_info.version {
+    return Err(FrontendPkgErr::PkgOutdated(
       release.name.clone(),
-      project_manifest.version_info.version,
-    )),
-    Ordering::Equal | Ordering::Greater => Ok(()),
+      project_manifest.version_info.version.into(),
+    ));
   }
+  Ok(())
 }
 
 fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
@@ -198,18 +195,14 @@ fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
       return Ok(());
     }
   };
-  let compare_res = compare_package_versions(
-    &temp_manifest.version_info.version,
-    &project_manifest.version_info.version,
-  )?;
 
-  match compare_res {
-    Ordering::Less => Err(FrontendPkgErr::PkgOutdated(
-      temp_manifest.version_info.version,
-      project_manifest.version_info.version,
-    )),
-    Ordering::Equal | Ordering::Greater => Ok(()),
+  if temp_manifest.version_info.version < project_manifest.version_info.version {
+    return Err(FrontendPkgErr::PkgOutdated(
+      temp_manifest.version_info.version.into(),
+      project_manifest.version_info.version.into(),
+    ));
   }
+  Ok(())
 }
 
 pub enum FrontendPkgErr {

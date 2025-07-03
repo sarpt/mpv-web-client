@@ -1,5 +1,5 @@
-use serde::Deserialize;
-use std::{cmp::Ordering, fs::rename, io::Read, path::Path};
+use serde::{Deserialize, Deserializer};
+use std::{fs::rename, io::Read, path::Path};
 
 use crate::{
   frontend::FrontendPkgErr,
@@ -10,7 +10,7 @@ pub const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
 
 #[derive(Deserialize, PartialEq)]
 pub struct VersionInfo {
-  pub version: String,
+  pub version: Semver,
   pub commit: String,
 }
 
@@ -68,49 +68,54 @@ pub fn move_manifest_to_project_home() -> Result<(), FrontendPkgErr> {
   rename(manifest_file_path, new_manifest_file_path).map_err(FrontendPkgErr::HomeDirInaccessible)
 }
 
+#[derive(PartialEq, PartialOrd)]
+pub struct Semver {
+  major: usize,
+  minor: usize,
+  patch: usize,
+}
+
 const VERSION_SEMVER_SEPARATOR: &str = ".";
-// TODO: can't be PartialOrd/Ord since parsing of Semver may fail and None will not handle that correctly.
-// Create a Semver type that can be deserialized by serde and evaluated at parsing time?
-pub fn compare_package_versions(
-  a_version: &String,
-  b_version: &String,
-) -> Result<Ordering, FrontendPkgErr> {
-  if a_version == b_version {
-    return Ok(Ordering::Equal);
-  };
-
-  let split_a_semver = a_version.split(VERSION_SEMVER_SEPARATOR).map(|chunk| {
-    chunk
-      .parse::<usize>()
-      .map_err(|_| FrontendPkgErr::ManifestInvalid("could not parse version as semver".to_owned()))
-  });
-  let mut split_b_semver = b_version.split(VERSION_SEMVER_SEPARATOR).map(|chunk| {
-    chunk
-      .parse::<usize>()
-      .map_err(|_| FrontendPkgErr::ManifestInvalid("could not parse version as semver".to_owned()))
-  });
-  for (idx, a_semver_chunk_result) in split_a_semver.enumerate() {
-    let a_semver_chunk = a_semver_chunk_result?;
-    match split_b_semver.nth(idx) {
-      Some(b_semver_chunk_result) => {
-        let b_semver_chunk = b_semver_chunk_result?;
-        if a_semver_chunk == b_semver_chunk {
-          continue;
-        }
-
-        if a_semver_chunk > b_semver_chunk {
-          return Ok(Ordering::Greater);
-        } else {
-          return Ok(Ordering::Less);
-        };
-      }
-      None => {
-        return Err(FrontendPkgErr::ManifestInvalid(
-          "could not compare semvers since they don't have equal format".to_owned(),
-        ));
-      }
-    }
+impl<'de> Deserialize<'de> for Semver {
+  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  where
+    D: Deserializer<'de>,
+  {
+    let version = String::deserialize(deserializer)?;
+    Semver::from_string(&version).map_err(serde::de::Error::custom)
   }
+}
 
-  Ok(Ordering::Equal)
+impl Semver {
+  fn from_string(source: &String) -> Result<Self, String> {
+    let mut split_version = source.split(VERSION_SEMVER_SEPARATOR).map(|chunk| {
+      chunk
+        .parse::<usize>()
+        .map_err(|err| format!("could not parse source string of \"{source}\" as semver: {err}"))
+    });
+    let major: usize = split_version.nth(0).unwrap_or(Ok(0))?;
+    let minor: usize = split_version.nth(1).unwrap_or(Ok(0))?;
+    let patch: usize = split_version.nth(2).unwrap_or(Ok(0))?;
+    Ok(Semver {
+      major,
+      minor,
+      patch,
+    })
+  }
+}
+
+impl TryFrom<&String> for Semver {
+  type Error = String;
+
+  fn try_from(value: &String) -> Result<Self, Self::Error> {
+    Semver::from_string(value)
+  }
+}
+
+impl From<Semver> for String {
+  fn from(val: Semver) -> Self {
+    [val.major, val.minor, val.patch]
+      .map(|chunk| chunk.to_string())
+      .join(VERSION_SEMVER_SEPARATOR)
+  }
 }
