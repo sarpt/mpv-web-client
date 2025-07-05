@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::{fs::rename, io::Read, path::Path};
 
 use crate::{
-  frontend::{FrontendPkgErr, pkg_manifest::semver::Semver},
+  frontend::{FrontendPkgErr, pkg::manifest::semver::Semver},
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir},
 };
 

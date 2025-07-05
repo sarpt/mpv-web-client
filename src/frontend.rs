@@ -1,16 +1,14 @@
-use flate2::bufread::GzDecoder;
 use log::{info, warn};
 use std::{
   fmt::Display,
-  fs::{create_dir_all, exists, remove_file},
-  io::{BufReader, BufWriter, Seek, copy},
+  fs::{create_dir_all, exists},
   path::{Path, PathBuf},
 };
-use tar::Archive;
 
 use crate::{
   frontend::{
-    pkg_manifest::{
+    pkg::extraction::extract_frontend_pkg,
+    pkg::manifest::{
       PKG_MANIFEST_NAME, move_manifest_to_project_home, parse_project_package_manifest,
       parse_temp_package_manifest, semver::Semver,
     },
@@ -19,10 +17,9 @@ use crate::{
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
 };
 
-mod pkg_manifest;
+mod pkg;
 pub mod releases;
 
-pub const INDEX_FILE_NAME: &str = "index.html";
 pub async fn install_package<T>(pkg_path: T) -> Result<(), FrontendPkgErr>
 where
   T: AsRef<Path> + Send + Sync + 'static,
@@ -49,8 +46,7 @@ where
   T: AsRef<Path>,
 {
   {
-    let mut path = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-    path.push(INDEX_FILE_NAME);
+    let path = get_frontend_index_path().map_err(FrontendPkgErr::HomeDirInaccessible)?;
     let index_exists = exists(path).map_err(|err| FrontendPkgErr::IndexNotFound(Some(err)))?;
     if !index_exists {
       if pkg_path.is_none() {
@@ -80,55 +76,6 @@ where
   Ok(())
 }
 
-const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
-const TEMP_INFLATED_PKG_NAME: &str = "inflated.tar";
-pub fn extract_frontend_pkg<T>(src_path: T) -> Result<(), FrontendPkgErr>
-where
-  T: AsRef<Path>,
-{
-  let src_file_open_handle = std::fs::OpenOptions::new()
-    .create(false)
-    .read(true)
-    .write(false)
-    .open(&src_path)
-    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
-
-  let temp_inflated_path = {
-    let mut temp_path = get_temp_dir();
-    temp_path.push(TEMP_INFLATED_PKG_NAME);
-    temp_path
-  };
-
-  let mut temp_inflated_file_open_handle = std::fs::OpenOptions::new()
-    .create(true)
-    .truncate(true)
-    .read(true)
-    .write(true)
-    .open(&temp_inflated_path)
-    .map_err(FrontendPkgErr::PkgUnpackErr)?;
-
-  let src_pkg_reader = BufReader::with_capacity(STREAM_CHUNK_SIZE, src_file_open_handle);
-  let mut decoder = GzDecoder::new(src_pkg_reader);
-  let mut inflated_writer =
-    BufWriter::with_capacity(STREAM_CHUNK_SIZE, &temp_inflated_file_open_handle);
-  copy(&mut decoder, &mut inflated_writer)
-    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
-  drop(inflated_writer);
-
-  temp_inflated_file_open_handle
-    .seek(std::io::SeekFrom::Start(0))
-    .map_err(FrontendPkgErr::HomeDirInaccessible)?;
-
-  let unpack_temp_dir = get_frontend_temp_dir();
-  let mut tar_archive = Archive::new(temp_inflated_file_open_handle);
-  tar_archive
-    .unpack(&unpack_temp_dir)
-    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
-  remove_file(temp_inflated_path).map_err(FrontendPkgErr::HomeDirInaccessible)?;
-
-  Ok(())
-}
-
 pub async fn get_frontend_file<T>(name: T) -> Result<(tokio::fs::File, PathBuf), std::io::Error>
 where
   T: AsRef<Path>,
@@ -147,6 +94,13 @@ where
     Ok(src_file) => Ok((src_file, src_path)),
     Err(err) => Err(err),
   }
+}
+
+pub const INDEX_FILE_NAME: &str = "index.html";
+pub fn get_frontend_index_path() -> Result<PathBuf, std::io::Error> {
+  let mut path = get_frontend_dir()?;
+  path.push(INDEX_FILE_NAME);
+  Ok(path)
 }
 
 pub enum RemoteReleaseCheckResult {
