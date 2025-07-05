@@ -23,18 +23,31 @@ mod pkg_manifest;
 pub mod releases;
 
 pub const INDEX_FILE_NAME: &str = "index.html";
+pub async fn install_package<T>(pkg_path: T) -> Result<(), FrontendPkgErr>
+where
+  T: AsRef<Path> + Send + Sync + 'static,
+{
+  let result = tokio::task::spawn_blocking(move || extract_frontend_pkg(pkg_path)).await;
+  let extract_frontend_result = match result {
+    Ok(res) => res,
+    Err(e) => {
+      return Err(FrontendPkgErr::PkgInstallFailed(format!(
+        "issue with joining on blocking task for frontend extraction: {e}"
+      )));
+    }
+  };
+
+  extract_frontend_result?;
+  check_new_pkg_manifest_against_local_one()?;
+  move_frontend_pkg_to_home()?;
+  move_manifest_to_project_home()?;
+  Ok(())
+}
 
 pub fn check_frontend_pkg<T>(pkg_path: Option<T>) -> Result<(), FrontendPkgErr>
 where
   T: AsRef<Path>,
 {
-  if let Some(path) = &pkg_path {
-    extract_frontend_pkg(path)?;
-    check_new_pkg_manifest_against_local_one()?;
-    move_frontend_pkg_to_home()?;
-    move_manifest_to_project_home()?;
-  }
-
   {
     let mut path = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
     path.push(INDEX_FILE_NAME);
@@ -226,6 +239,7 @@ fn check_new_pkg_manifest_against_local_one() -> Result<(), FrontendPkgErr> {
 
 pub enum FrontendPkgErr {
   IndexNotFound(Option<std::io::Error>),
+  PkgInstallFailed(String),
   PkgNotProvided,
   PkgUnpackErr(std::io::Error),
   PkgInvalid(String),
@@ -239,6 +253,7 @@ impl Display for FrontendPkgErr {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       FrontendPkgErr::PkgInvalid(err) => write!(f, "provided pkg file is invalid: {err}"),
+      FrontendPkgErr::PkgInstallFailed(err) => write!(f, "package install failed: {err}"),
       FrontendPkgErr::IndexNotFound(error) => write!(
         f,
         "frontend cannot be served due to lack of entrypoint file: {error:?}"
