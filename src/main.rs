@@ -4,7 +4,7 @@ use std::{error::Error, path::PathBuf, time::SystemTime};
 
 use crate::{
   frontend::{
-    RemoteReleaseCheckResult, check_for_newer_remote_release, check_frontend_pkg,
+    RemoteReleaseCheckResult, check_for_newer_remote_release, check_frontend_pkg, install_package,
     releases::{Release, fetch_remote_frontend_package_release},
   },
   project_paths::ensure_project_dirs,
@@ -60,7 +60,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn init_frontend(args: &Args) -> Result<(), String> {
   let mut pkg_path = args.pkg.to_owned();
-
   if pkg_path.is_none() {
     if let Some(new_release) = remote_frontend_release_available(args.update).await {
       info!(
@@ -71,13 +70,13 @@ async fn init_frontend(args: &Args) -> Result<(), String> {
     }
   }
 
-  let result = tokio::task::spawn_blocking(|| check_frontend_pkg(pkg_path)).await; // TODO: this should be public async fn frontend::install_package
-  let check_frontend_result = match result {
-    Ok(res) => res,
-    Err(e) => return Err(format!("issue with joining on blocking task {e}")),
-  };
+  if let Some(ref path) = pkg_path {
+    install_package(path.to_owned())
+      .await
+      .map_err(|err| format!("frontend package install failed: {err}"))?;
+  }
 
-  match check_frontend_result {
+  match check_frontend_pkg(pkg_path) {
     Ok(_) => Ok(()),
     Err(err) => Err(format!("frontend init failed: {err}")),
   }
