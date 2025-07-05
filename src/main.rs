@@ -56,7 +56,7 @@ async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
         }
       }
       Err(err) => {
-        error!("{err}");
+        error!("check for the latest remote package failed: {err}");
       }
     };
   }
