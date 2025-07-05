@@ -27,9 +27,9 @@ impl Semver {
         .parse::<usize>()
         .map_err(|err| format!("could not parse source string of \"{source}\" as semver: {err}"))
     });
-    let major: usize = split_version.nth(0).unwrap_or(Ok(0))?;
-    let minor: usize = split_version.nth(1).unwrap_or(Ok(0))?;
-    let patch: usize = split_version.nth(2).unwrap_or(Ok(0))?;
+    let major: usize = split_version.next().unwrap_or(Ok(0))?;
+    let minor: usize = split_version.next().unwrap_or(Ok(0))?;
+    let patch: usize = split_version.next().unwrap_or(Ok(0))?;
     Ok(Semver {
       major,
       minor,
