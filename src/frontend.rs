@@ -141,8 +141,17 @@ pub async fn newer_remote_release_available() -> Result<Release, FrontendPkgErr>
     .await
     .map_err(FrontendPkgErr::RemoteReleaseCheckFailure)?;
 
-  info!("the latest version is \"{}\"", release.tag_name);
-  check_release_against_existing_one(&release)?;
+  info!(
+    "the latest remote frontend version is \"{}\"",
+    release.tag_name
+  );
+  let (local_version, remote_version) = check_release_against_existing_one(&release)?;
+  match local_version {
+    Some(local) => info!(
+      "local frontend version is \"{local}\", the newer remote version is \"{remote_version}\" "
+    ),
+    None => info!("could not infer local frontend package version"),
+  }
   Ok(release)
 }
 
@@ -168,22 +177,24 @@ fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   Ok(())
 }
 
-fn check_release_against_existing_one(release: &Release) -> Result<(), FrontendPkgErr> {
+fn check_release_against_existing_one(
+  release: &Release,
+) -> Result<(Option<Semver>, Semver), FrontendPkgErr> {
+  let release_semver = Semver::try_from(&release.name).map_err(FrontendPkgErr::ManifestInvalid)?;
   let project_manifest = match parse_project_package_manifest() {
     Ok(m) => m,
     Err(err) => {
       warn!("could not parse existing frontend package manifest: {err}");
-      return Ok(());
+      return Ok((None, release_semver));
     }
   };
-  let release_semver = Semver::try_from(&release.name).map_err(FrontendPkgErr::ManifestInvalid)?;
   if release_semver < project_manifest.version_info.version {
     return Err(FrontendPkgErr::PkgOutdated(
       release.name.clone(),
       project_manifest.version_info.version.into(),
     ));
   }
-  Ok(())
+  Ok((Some(project_manifest.version_info.version), release_semver))
 }
 
 fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
