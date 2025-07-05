@@ -11,8 +11,8 @@ use tar::Archive;
 use crate::{
   frontend::{
     pkg_manifest::{
-      PKG_MANIFEST_NAME, Semver, move_manifest_to_project_home, parse_project_package_manifest,
-      parse_temp_package_manifest,
+      PKG_MANIFEST_NAME, move_manifest_to_project_home, parse_project_package_manifest,
+      parse_temp_package_manifest, semver::Semver,
     },
     releases::{Release, ReleaseFetchErr, check_latest_remote_release},
   },
