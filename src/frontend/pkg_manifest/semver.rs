@@ -36,6 +36,12 @@ impl Semver {
       patch,
     })
   }
+
+  fn string_representation(&self) -> String {
+    [self.major, self.minor, self.patch]
+      .map(|chunk| chunk.to_string())
+      .join(VERSION_SEMVER_SEPARATOR)
+  }
 }
 
 impl TryFrom<&String> for Semver {
@@ -48,14 +54,12 @@ impl TryFrom<&String> for Semver {
 
 impl From<Semver> for String {
   fn from(val: Semver) -> Self {
-    [val.major, val.minor, val.patch]
-      .map(|chunk| chunk.to_string())
-      .join(VERSION_SEMVER_SEPARATOR)
+    val.string_representation()
   }
 }
 
 impl Display for Semver {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    write!(f, "{}", self.string_representation())
   }
 }
