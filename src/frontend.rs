@@ -24,19 +24,22 @@ pub async fn install_package<T>(pkg_path: T) -> Result<(), FrontendPkgErr>
 where
   T: AsRef<Path> + Send + Sync + 'static,
 {
-  let result = tokio::task::spawn_blocking(move || extract_frontend_pkg(pkg_path)).await;
-  let extract_frontend_result = match result {
-    Ok(res) => res,
-    Err(e) => {
-      return Err(FrontendPkgErr::PkgInstallFailed(format!(
+  tokio::task::spawn_blocking(|| extract_frontend_pkg(pkg_path))
+    .await
+    .map_err(|e| {
+      FrontendPkgErr::PkgInstallFailed(format!(
         "issue with joining on blocking task for frontend extraction: {e}"
-      )));
-    }
-  };
+      ))
+    })??;
 
-  extract_frontend_result?;
   check_new_pkg_manifest_against_local_one().await?;
-  move_frontend_pkg_to_home()?;
+  tokio::task::spawn_blocking(move_frontend_pkg_to_home)
+    .await
+    .map_err(|e| {
+      FrontendPkgErr::PkgInstallFailed(format!(
+        "issue with joining on blocking task for frontend move: {e}"
+      ))
+    })??;
   move_manifest_to_project_home().await?;
   Ok(())
 }
