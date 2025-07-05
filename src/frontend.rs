@@ -136,7 +136,7 @@ where
   }
 }
 
-pub async fn newer_remote_release_available() -> Result<Release, FrontendPkgErr> {
+pub async fn newer_remote_release_available() -> Result<Option<Release>, FrontendPkgErr> {
   let release = check_latest_remote_release()
     .await
     .map_err(FrontendPkgErr::RemoteReleaseCheckFailure)?;
@@ -147,12 +147,22 @@ pub async fn newer_remote_release_available() -> Result<Release, FrontendPkgErr>
   );
   let (local_version, remote_version) = check_release_against_existing_one(&release)?;
   match local_version {
-    Some(local) => info!(
-      "local frontend version is \"{local}\", the newer remote version is \"{remote_version}\" "
-    ),
-    None => info!("could not infer local frontend package version"),
+    Some(local) => {
+      if local >= remote_version {
+        info!("local frontend version \"{local}\" is up to date");
+        Ok(None)
+      } else {
+        info!(
+          "local frontend version \"{local}\" is outdated, the newer remote version is \"{remote_version}\""
+        );
+        Ok(Some(release))
+      }
+    }
+    None => {
+      info!("could not infer local frontend package version");
+      Ok(Some(release))
+    }
   }
-  Ok(release)
 }
 
 fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
@@ -188,12 +198,6 @@ fn check_release_against_existing_one(
       return Ok((None, release_semver));
     }
   };
-  if release_semver < project_manifest.version_info.version {
-    return Err(FrontendPkgErr::PkgOutdated(
-      release.name.clone(),
-      project_manifest.version_info.version.into(),
-    ));
-  }
   Ok((Some(project_manifest.version_info.version), release_semver))
 }
 
