@@ -30,7 +30,7 @@ where
 {
   if let Some(path) = &pkg_path {
     extract_frontend_pkg(path)?;
-    check_new_pkg_manifest_against_existing_one()?;
+    check_new_pkg_manifest_against_local_one()?;
     move_frontend_pkg_to_home()?;
     move_manifest_to_project_home()?;
   }
@@ -136,7 +136,12 @@ where
   }
 }
 
-pub async fn newer_remote_release_available() -> Result<Option<Release>, FrontendPkgErr> {
+pub enum RemoteReleaseCheckResult {
+  UpToDate(Semver),
+  NewerRemoteAvailable(Release),
+  RemoteNecessary(Release),
+}
+pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult, FrontendPkgErr> {
   let release = check_latest_remote_release()
     .await
     .map_err(FrontendPkgErr::RemoteReleaseCheckFailure)?;
@@ -145,22 +150,21 @@ pub async fn newer_remote_release_available() -> Result<Option<Release>, Fronten
     "the latest remote frontend version is \"{}\"",
     release.tag_name
   );
-  let (local_version, remote_version) = check_release_against_existing_one(&release)?;
+  let (local_version, remote_version) = check_release_against_local_one(&release)?;
   match local_version {
     Some(local) => {
       if local >= remote_version {
-        info!("local frontend version \"{local}\" is up to date");
-        Ok(None)
+        Ok(RemoteReleaseCheckResult::UpToDate(local))
       } else {
         info!(
           "local frontend version \"{local}\" is outdated, the newer remote version is \"{remote_version}\""
         );
-        Ok(Some(release))
+        Ok(RemoteReleaseCheckResult::NewerRemoteAvailable(release))
       }
     }
     None => {
-      info!("could not infer local frontend package version");
-      Ok(Some(release))
+      warn!("could not infer local frontend package version");
+      Ok(RemoteReleaseCheckResult::RemoteNecessary(release))
     }
   }
 }
@@ -187,7 +191,7 @@ fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   Ok(())
 }
 
-fn check_release_against_existing_one(
+fn check_release_against_local_one(
   release: &Release,
 ) -> Result<(Option<Semver>, Semver), FrontendPkgErr> {
   let release_semver = Semver::try_from(&release.name).map_err(FrontendPkgErr::ManifestInvalid)?;
@@ -201,7 +205,7 @@ fn check_release_against_existing_one(
   Ok((Some(project_manifest.version_info.version), release_semver))
 }
 
-fn check_new_pkg_manifest_against_existing_one() -> Result<(), FrontendPkgErr> {
+fn check_new_pkg_manifest_against_local_one() -> Result<(), FrontendPkgErr> {
   let temp_manifest = parse_temp_package_manifest()?;
   let project_manifest = match parse_project_package_manifest() {
     Ok(m) => m,
