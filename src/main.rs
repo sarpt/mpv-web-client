@@ -46,12 +46,14 @@ async fn init_frontend(pkg_path: &Option<PathBuf>) -> Result<(), String> {
 
   if path_pkg.is_none() {
     match newer_remote_release_available().await {
-      Ok(release) => {
-        path_pkg = match fetch_remote_frontend_package_release(&release).await {
-          Ok(path_pkg) => Some(path_pkg),
-          Err(err) => {
-            error!("fetch of remote frontend package failed: {err}");
-            None
+      Ok(result) => {
+        if let Some(new_release) = result {
+          path_pkg = match fetch_remote_frontend_package_release(&new_release).await {
+            Ok(path_pkg) => Some(path_pkg),
+            Err(err) => {
+              error!("fetch of remote frontend package failed: {err}");
+              None
+            }
           }
         }
       }
