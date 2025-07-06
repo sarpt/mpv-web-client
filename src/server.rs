@@ -1,24 +1,22 @@
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
 
-use futures::StreamExt;
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Empty, StreamBody};
-use hyper::body::{Bytes, Frame};
-use hyper::header::HeaderValue;
+use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
-use tokio::io::BufReader;
 use tokio::net::TcpListener;
-use tokio_util::io::ReaderStream;
 
-use crate::frontend::{INDEX_FILE_NAME, get_frontend_file};
-use crate::server::common::ServiceError;
+use crate::server::api::{check_latest_frontend_release, update_frontend_package};
+use crate::server::common::{ServiceError, empty_body, full_body};
+use crate::server::frontend::serve_frontend;
 use crate::server::router::get_route;
 
+mod api;
 mod common;
+mod frontend;
 mod router;
 
 const DEFAULT_PORT: u16 = 3000;
@@ -42,65 +40,31 @@ pub async fn serve() -> Result<(), Box<dyn Error>> {
 async fn service(
   req: Request<hyper::body::Incoming>,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  let route = get_route(&req);
+  let route = get_route(req).await;
 
   match route {
-    Some(r) => match r {
+    Ok(r) => match r {
       router::Routes::Frontend(name) => serve_frontend(name.as_deref()).await,
+      router::Routes::Api(api_route) => match api_route {
+        router::ApiRoutes::FrontendLatest => check_latest_frontend_release().await,
+        router::ApiRoutes::FrontendUpdate(release) => update_frontend_package(release).await,
+      },
     },
-    None => {
-      let mut not_found = Response::new(empty());
-      *not_found.status_mut() = StatusCode::NOT_FOUND;
-      Ok(not_found)
+    Err(err) => {
+      let mut response = Response::new(empty_body());
+      match err {
+        router::RoutingErr::Unmatched => {
+          *response.status_mut() = StatusCode::NOT_FOUND;
+        }
+        router::RoutingErr::InvalidMethod => {
+          *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
+        }
+        router::RoutingErr::InvalidRequest(e) => {
+          *response.status_mut() = StatusCode::BAD_REQUEST;
+          *response.body_mut() = full_body(format!("request invalid: {e}"));
+        }
+      };
+      Ok(response)
     }
   }
-}
-
-const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
-async fn serve_frontend(
-  name: Option<&str>,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  let src_name = match name {
-    Some(name) => name,
-    None => INDEX_FILE_NAME,
-  };
-  let (src_file, src_path) = match get_frontend_file(&src_name).await {
-    Ok((src_file, src_path)) => (src_file, src_path),
-    Err(err) => {
-      let name: &str = src_name;
-      if name == INDEX_FILE_NAME {
-        return Err(Box::new(err));
-      }
-
-      // fallback to index file on unmatched paths
-      // required for BrowserRouter in mpv-web-frontend
-      match get_frontend_file(INDEX_FILE_NAME).await {
-        Ok((src_file, src_path)) => (src_file, src_path),
-        Err(err) => return Err(Box::new(err)),
-      }
-    }
-  };
-  let reader = BufReader::with_capacity(STREAM_CHUNK_SIZE, src_file);
-  let reader_stream = ReaderStream::new(reader).map(|chunk| match chunk {
-    Ok(bytes) => Ok(Frame::data(bytes)),
-    Err(err) => Err(Box::new(err).into()),
-  });
-
-  let media_type = mime_guess::from_path(&src_path);
-  let mime_type = media_type
-    .first()
-    .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
-
-  let mut response = Response::new(BoxBody::new(StreamBody::new(reader_stream)));
-  response.headers_mut().append(
-    "Content-Type",
-    HeaderValue::from_str(mime_type.as_ref()).unwrap(),
-  );
-  Ok(response)
-}
-
-fn empty() -> BoxBody<Bytes, ServiceError> {
-  Empty::<Bytes>::new()
-    .map_err(|never| match never {})
-    .boxed()
 }

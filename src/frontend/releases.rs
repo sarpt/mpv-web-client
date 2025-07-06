@@ -1,7 +1,7 @@
 use std::{fmt::Display, path::PathBuf};
 
 use reqwest::{Client, IntoUrl, Request};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
   fs::OpenOptions,
   io::{AsyncWriteExt, BufWriter},
@@ -10,18 +10,58 @@ use tokio::{
 use crate::project_paths::get_temp_dir;
 
 #[derive(Deserialize)]
-pub struct Asset {
+struct Asset {
   pub browser_download_url: String,
   pub content_type: String,
   pub size: usize,
 }
 
 #[derive(Deserialize)]
-pub struct Release {
+struct RemoteRelease {
   pub tag_name: String,
   pub name: String,
   pub body: String,
   pub assets: Vec<Asset>,
+}
+
+impl RemoteRelease {
+  fn is_asset_a_frontend_package(asset: &Asset) -> bool {
+    asset.content_type == "application/gzip"
+  }
+}
+
+impl From<RemoteRelease> for Release {
+  fn from(val: RemoteRelease) -> Self {
+    let download = val
+      .assets
+      .iter()
+      .find(|asset| RemoteRelease::is_asset_a_frontend_package(asset))
+      .map(|asset| ReleaseDownloadInfo {
+        url: asset.browser_download_url.to_owned(),
+        size: asset.size,
+      });
+
+    Release {
+      name: val.name,
+      description: val.body,
+      verion: val.tag_name,
+      download,
+    }
+  }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct ReleaseDownloadInfo {
+  pub url: String,
+  pub size: usize,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Release {
+  pub name: String,
+  pub verion: String,
+  pub description: String,
+  pub download: Option<ReleaseDownloadInfo>,
 }
 
 const LATEST_RELEASES_URL: &str =
@@ -40,28 +80,24 @@ pub async fn check_latest_remote_release() -> Result<Release, ReleaseFetchErr> {
       ReleaseFetchErr::ResponseParseFailure(format!("could not retrieve text response : {err}"))
     })?;
 
-  let response: Release = serde_json::from_str(&response_text).map_err(|err| {
+  let response: RemoteRelease = serde_json::from_str(&response_text).map_err(|err| {
     ReleaseFetchErr::ResponseParseFailure(format!("response has invalid JSON: {err}"))
   })?;
-  Ok(response)
+  Ok(response.into())
 }
 
 pub async fn fetch_remote_frontend_package_release(
   release: &Release,
 ) -> Result<PathBuf, ReleaseFetchErr> {
-  let asset = match release
-    .assets
-    .iter()
-    .find(|asset| is_asset_a_frontend_package(asset))
-  {
-    Some(url) => url,
+  let download = match &release.download {
+    Some(download) => download,
     None => {
       return Err(ReleaseFetchErr::NoPkgAssets);
     }
   };
 
   let client = Client::new();
-  let request = get_request(&client, &asset.browser_download_url)?;
+  let request = get_request(&client, &download.url)?;
   let mut response = client
     .execute(request)
     .await
@@ -98,15 +134,11 @@ pub async fn fetch_remote_frontend_package_release(
     .await
     .map_err(ReleaseFetchErr::WriteToDiskFailed)?;
 
-  if total_written != asset.size {
-    return Err(ReleaseFetchErr::SizeMismatch(total_written, asset.size));
+  if total_written != download.size {
+    return Err(ReleaseFetchErr::SizeMismatch(total_written, download.size));
   }
 
   Ok(target_path)
-}
-
-fn is_asset_a_frontend_package(asset: &Asset) -> bool {
-  asset.content_type == "application/gzip"
 }
 
 fn get_request<T>(client: &Client, url: T) -> Result<Request, ReleaseFetchErr>
