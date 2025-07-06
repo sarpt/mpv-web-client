@@ -118,7 +118,7 @@ pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult
 
   info!(
     "the latest remote frontend version is \"{}\"",
-    release.tag_name
+    release.verion
   );
   let (local_version, remote_version) = check_release_against_local_one(&release).await?;
   match local_version {
