@@ -2,7 +2,6 @@ use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
 
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Empty};
 use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
@@ -10,8 +9,8 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use tokio::net::TcpListener;
 
-use crate::server::api::check_latest_frontend_release;
-use crate::server::common::ServiceError;
+use crate::server::api::{check_latest_frontend_release, update_frontend_package};
+use crate::server::common::{ServiceError, empty_body, full_body};
 use crate::server::frontend::serve_frontend;
 use crate::server::router::get_route;
 
@@ -41,25 +40,31 @@ pub async fn serve() -> Result<(), Box<dyn Error>> {
 async fn service(
   req: Request<hyper::body::Incoming>,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  let route = get_route(&req);
+  let route = get_route(req).await;
 
   match route {
-    Some(r) => match r {
+    Ok(r) => match r {
       router::Routes::Frontend(name) => serve_frontend(name.as_deref()).await,
       router::Routes::Api(api_route) => match api_route {
         router::ApiRoutes::FrontendLatest => check_latest_frontend_release().await,
+        router::ApiRoutes::FrontendUpdate(release) => update_frontend_package(release).await,
       },
     },
-    None => {
-      let mut not_found = Response::new(empty());
-      *not_found.status_mut() = StatusCode::NOT_FOUND;
-      Ok(not_found)
+    Err(err) => {
+      let mut response = Response::new(empty_body());
+      match err {
+        router::RoutingErr::Unmatched => {
+          *response.status_mut() = StatusCode::NOT_FOUND;
+        }
+        router::RoutingErr::InvalidMethod => {
+          *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
+        }
+        router::RoutingErr::InvalidRequest(e) => {
+          *response.status_mut() = StatusCode::BAD_REQUEST;
+          *response.body_mut() = full_body(format!("request invalid: {e}"));
+        }
+      };
+      Ok(response)
     }
   }
-}
-
-fn empty() -> BoxBody<Bytes, ServiceError> {
-  Empty::<Bytes>::new()
-    .map_err(|never| match never {})
-    .boxed()
 }

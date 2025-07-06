@@ -50,13 +50,13 @@ impl From<RemoteRelease> for Release {
   }
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ReleaseDownloadInfo {
   pub url: String,
   pub size: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Release {
   pub name: String,
   pub verion: String,
