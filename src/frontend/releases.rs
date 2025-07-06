@@ -35,7 +35,8 @@ impl From<RemoteRelease> for Release {
     let download = val
       .assets
       .iter()
-      .find(|asset| RemoteRelease::is_asset_a_frontend_package(asset)).map(|asset| ReleaseDownloadInfo {
+      .find(|asset| RemoteRelease::is_asset_a_frontend_package(asset))
+      .map(|asset| ReleaseDownloadInfo {
         url: asset.browser_download_url.to_owned(),
         size: asset.size,
       });
