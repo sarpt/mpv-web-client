@@ -1,7 +1,7 @@
 use std::{fmt::Display, path::PathBuf};
 
 use reqwest::{Client, IntoUrl, Request};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
   fs::OpenOptions,
   io::{AsyncWriteExt, BufWriter},
@@ -9,14 +9,14 @@ use tokio::{
 
 use crate::project_paths::get_temp_dir;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Asset {
   pub browser_download_url: String,
   pub content_type: String,
   pub size: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Release {
   pub tag_name: String,
   pub name: String,

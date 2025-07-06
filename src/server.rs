@@ -14,6 +14,7 @@ use tokio::io::BufReader;
 use tokio::net::TcpListener;
 use tokio_util::io::ReaderStream;
 
+use crate::frontend::releases::check_latest_remote_release;
 use crate::frontend::{INDEX_FILE_NAME, get_frontend_file};
 use crate::server::common::ServiceError;
 use crate::server::router::get_route;
@@ -47,6 +48,9 @@ async fn service(
   match route {
     Some(r) => match r {
       router::Routes::Frontend(name) => serve_frontend(name.as_deref()).await,
+      router::Routes::Api(api_route) => match api_route {
+        router::ApiRoutes::FrontendLatest => check_latest_frontend_release().await,
+      },
     },
     None => {
       let mut not_found = Response::new(empty());
@@ -96,6 +100,32 @@ async fn serve_frontend(
     "Content-Type",
     HeaderValue::from_str(mime_type.as_ref()).unwrap(),
   );
+  Ok(response)
+}
+
+async fn check_latest_frontend_release()
+-> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
+  let response = match check_latest_remote_release().await {
+    Ok(latest_release) => {
+      let release_text = serde_json::to_string(&latest_release).map_err(Box::new)?;
+      let body = BoxBody::new(release_text).map_err(|e| match e {}).boxed();
+      let mut response = Response::new(body);
+      response.headers_mut().append(
+        "Content-Type",
+        HeaderValue::from_str(mime_guess::mime::APPLICATION_JSON.as_ref()).unwrap(),
+      );
+      response
+    }
+    Err(err) => {
+      let body = BoxBody::new(format!("could not fetch latest release: {err}"))
+        .map_err(|e| match e {})
+        .boxed();
+      let mut response = Response::new(body);
+      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      response
+    }
+  };
+
   Ok(response)
 }
 
