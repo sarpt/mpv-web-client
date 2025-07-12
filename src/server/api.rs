@@ -46,7 +46,8 @@ pub async fn update_frontend_package(
     }
   };
 
-  match install_package(path).await {
+  const FORCE_OUTDATED: bool = true; // TODO: this should be provided from frontend. atm always force outdated pkg
+  match install_package(path, FORCE_OUTDATED).await {
     Ok(()) => {
       let response = Response::new(empty_body());
       Ok(response)

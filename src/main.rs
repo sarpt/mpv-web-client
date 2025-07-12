@@ -71,7 +71,7 @@ async fn init_frontend(args: &Args) -> Result<(), String> {
   }
 
   if let Some(ref path) = pkg_path {
-    install_package(path.to_owned())
+    install_package(path.to_owned(), args.force_outdated)
       .await
       .map_err(|err| format!("frontend package install failed: {err}"))?;
   }
