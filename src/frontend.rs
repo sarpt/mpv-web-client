@@ -20,7 +20,7 @@ use crate::{
 mod pkg;
 pub mod releases;
 
-pub async fn install_package<T>(pkg_path: T) -> Result<(), FrontendPkgErr>
+pub async fn install_package<T>(pkg_path: T, force_outdated: bool) -> Result<(), FrontendPkgErr>
 where
   T: AsRef<Path> + Send + Sync + 'static,
 {
@@ -32,7 +32,23 @@ where
       ))
     })??;
 
-  check_new_pkg_manifest_against_local_one().await?;
+  match check_new_pkg_manifest_against_local_one().await {
+    Ok(()) => {}
+    Err(err) => {
+      match &err {
+        FrontendPkgErr::PkgOutdated(provided_version, served_version) => {
+          if force_outdated {
+            info!("forcing outdated version \"{provided_version}\" over \"{served_version}\"");
+          } else {
+            return Err(err);
+          }
+        }
+        _ => {
+          return Err(err);
+        }
+      };
+    }
+  };
   tokio::task::spawn_blocking(move_frontend_pkg_to_home)
     .await
     .map_err(|e| {
