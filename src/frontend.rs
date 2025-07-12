@@ -134,7 +134,7 @@ pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult
 
   info!(
     "the latest remote frontend version is \"{}\"",
-    release.verion
+    release.version
   );
   let (local_version, remote_version) = check_release_against_local_one(&release).await?;
   match local_version {
@@ -180,7 +180,7 @@ fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
 async fn check_release_against_local_one(
   release: &Release,
 ) -> Result<(Option<Semver>, Semver), FrontendPkgErr> {
-  let release_semver = Semver::try_from(&release.name).map_err(FrontendPkgErr::ManifestInvalid)?;
+  let release_semver = release.version;
   let project_manifest = match parse_project_package_manifest().await {
     Ok(m) => m,
     Err(err) => {

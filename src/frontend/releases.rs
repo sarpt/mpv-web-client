@@ -7,7 +7,7 @@ use tokio::{
   io::{AsyncWriteExt, BufWriter},
 };
 
-use crate::project_paths::get_temp_dir;
+use crate::{frontend::pkg::manifest::semver::Semver, project_paths::get_temp_dir};
 
 #[derive(Deserialize)]
 struct Asset {
@@ -30,8 +30,10 @@ impl RemoteRelease {
   }
 }
 
-impl From<RemoteRelease> for Release {
-  fn from(val: RemoteRelease) -> Self {
+impl TryFrom<RemoteRelease> for Release {
+  type Error = String;
+
+  fn try_from(val: RemoteRelease) -> Result<Release, std::string::String> {
     let download = val
       .assets
       .iter()
@@ -41,12 +43,15 @@ impl From<RemoteRelease> for Release {
         size: asset.size,
       });
 
-    Release {
+    Ok(Release {
       name: val.name,
       description: val.body,
-      verion: val.tag_name,
+      version: val
+        .tag_name
+        .try_into()
+        .map_err(|err| format!("can't parse tag_name as a version: {err}"))?,
       download,
-    }
+    })
   }
 }
 
@@ -59,7 +64,7 @@ pub struct ReleaseDownloadInfo {
 #[derive(Deserialize, Serialize)]
 pub struct Release {
   pub name: String,
-  pub verion: String,
+  pub version: Semver,
   pub description: String,
   pub download: Option<ReleaseDownloadInfo>,
 }
@@ -83,7 +88,10 @@ pub async fn check_latest_remote_release() -> Result<Release, ReleaseFetchErr> {
   let response: RemoteRelease = serde_json::from_str(&response_text).map_err(|err| {
     ReleaseFetchErr::ResponseParseFailure(format!("response has invalid JSON: {err}"))
   })?;
-  Ok(response.into())
+  let release = response
+    .try_into()
+    .map_err(ReleaseFetchErr::ResponseParseFailure)?;
+  Ok(release)
 }
 
 pub async fn fetch_remote_frontend_package_release(

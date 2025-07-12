@@ -1,8 +1,8 @@
 use std::fmt::Display;
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(PartialEq, PartialOrd)]
+#[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct Semver {
   major: usize,
   minor: usize,
@@ -17,6 +17,15 @@ impl<'de> Deserialize<'de> for Semver {
   {
     let version = String::deserialize(deserializer)?;
     Semver::from_string(&version).map_err(serde::de::Error::custom)
+  }
+}
+
+impl Serialize for Semver {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    String::serialize(&self.string_representation(), serializer)
   }
 }
 
@@ -49,6 +58,14 @@ impl TryFrom<&String> for Semver {
 
   fn try_from(value: &String) -> Result<Self, Self::Error> {
     Semver::from_string(value)
+  }
+}
+
+impl TryFrom<String> for Semver {
+  type Error = String;
+
+  fn try_from(value: String) -> Result<Self, Self::Error> {
+    Semver::from_string(&value)
   }
 }
 

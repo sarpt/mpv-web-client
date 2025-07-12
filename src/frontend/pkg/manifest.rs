@@ -71,9 +71,9 @@ where
   package_file
     .read_to_string(&mut toml_content)
     .await
-    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
+    .map_err(|err| FrontendPkgErr::ManifestInvalid(err.to_string()))?;
   let manifest: Manifest = toml::from_str(toml_content.as_ref())
-    .map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
+    .map_err(|err| FrontendPkgErr::ManifestInvalid(err.to_string()))?;
 
   Ok(manifest)
 }
