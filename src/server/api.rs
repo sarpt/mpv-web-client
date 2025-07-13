@@ -15,6 +15,12 @@ use crate::server::common::{ServiceError, empty_body, full_body};
 struct CheckLatestResponseBody {
   latest_release: Release,
   local_version: Option<Semver>,
+  should_update: bool,
+}
+
+#[derive(Serialize)]
+struct ApiErr {
+  err_msg: String,
 }
 
 pub async fn check_latest_frontend_release()
@@ -23,6 +29,7 @@ pub async fn check_latest_frontend_release()
     Ok(latest_release) => {
       let (local_version, _) = check_release_against_local_one(&latest_release).await;
       let response_body = CheckLatestResponseBody {
+        should_update: local_version.is_none_or(|local| local < latest_release.version),
         latest_release,
         local_version,
       };
@@ -36,8 +43,10 @@ pub async fn check_latest_frontend_release()
       response
     }
     Err(err) => {
-      let body = full_body(format!("could not fetch latest release: {err}"));
-      let mut response = Response::new(body);
+      let body = serde_json::to_string(&ApiErr {
+        err_msg: format!("could not fetch latest release: {err}"),
+      })?;
+      let mut response = Response::new(full_body(body));
       *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
       response
     }
@@ -52,8 +61,10 @@ pub async fn update_frontend_package(
   let path = match fetch_remote_frontend_package_release(&release).await {
     Ok(path) => path,
     Err(err) => {
-      let body = full_body(format!("could not fetch the release: {err}"));
-      let mut response = Response::new(body);
+      let body = serde_json::to_string(&ApiErr {
+        err_msg: format!("could not fetch the \"{}\" release: {err}", release.version),
+      })?;
+      let mut response = Response::new(full_body(body));
       *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
       return Ok(response);
     }
@@ -66,8 +77,10 @@ pub async fn update_frontend_package(
       Ok(response)
     }
     Err(err) => {
-      let body = full_body(format!("could not install the release: {err}"));
-      let mut response = Response::new(body);
+      let body = serde_json::to_string(&ApiErr {
+        err_msg: format!("could not fetch the \"{}\" release: {err}", release.version),
+      })?;
+      let mut response = Response::new(full_body(body));
       *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
       Ok(response)
     }
