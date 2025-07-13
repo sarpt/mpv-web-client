@@ -6,13 +6,12 @@ use tokio::{
 };
 
 use crate::{
-  frontend::{FrontendPkgErr, pkg::manifest::semver::Semver},
+  common::semver::Semver,
+  frontend::FrontendPkgErr,
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir},
 };
 
 pub const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
-
-pub mod semver;
 
 #[derive(Deserialize, PartialEq)]
 pub struct VersionInfo {

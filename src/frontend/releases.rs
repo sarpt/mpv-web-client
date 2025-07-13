@@ -7,7 +7,7 @@ use tokio::{
   io::{AsyncWriteExt, BufWriter},
 };
 
-use crate::{frontend::pkg::manifest::semver::Semver, project_paths::get_temp_dir};
+use crate::{common::semver::Semver, project_paths::get_temp_dir};
 
 #[derive(Deserialize)]
 struct Asset {
