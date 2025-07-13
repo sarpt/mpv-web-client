@@ -2,19 +2,32 @@ use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
 use hyper::header::HeaderValue;
 use hyper::{Response, StatusCode};
+use serde::Serialize;
 
-use crate::frontend::install_package;
+use crate::common::semver::Semver;
 use crate::frontend::releases::{
   Release, check_latest_remote_release, fetch_remote_frontend_package_release,
 };
+use crate::frontend::{check_release_against_local_one, install_package};
 use crate::server::common::{ServiceError, empty_body, full_body};
+
+#[derive(Serialize)]
+struct CheckLatestResponseBody {
+  latest_release: Release,
+  local_version: Option<Semver>,
+}
 
 pub async fn check_latest_frontend_release()
 -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
   let response = match check_latest_remote_release().await {
     Ok(latest_release) => {
-      let release_text = serde_json::to_string(&latest_release).map_err(Box::new)?;
-      let body = full_body(release_text);
+      let (local_version, _) = check_release_against_local_one(&latest_release).await;
+      let response_body = CheckLatestResponseBody {
+        latest_release,
+        local_version,
+      };
+      let body_text = serde_json::to_string(&response_body).map_err(Box::new)?;
+      let body = full_body(body_text);
       let mut response = Response::new(body);
       response.headers_mut().append(
         "Content-Type",

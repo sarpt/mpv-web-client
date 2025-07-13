@@ -11,6 +11,7 @@ use crate::{
   server::serve,
 };
 
+mod common;
 mod frontend;
 mod project_paths;
 mod server;

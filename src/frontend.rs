@@ -6,11 +6,14 @@ use std::{
 };
 
 use crate::{
+  common::semver::Semver,
   frontend::{
-    pkg::extraction::extract_frontend_pkg,
-    pkg::manifest::{
-      PKG_MANIFEST_NAME, move_manifest_to_project_home, parse_project_package_manifest,
-      parse_temp_package_manifest, semver::Semver,
+    pkg::{
+      extraction::extract_frontend_pkg,
+      manifest::{
+        PKG_MANIFEST_NAME, move_manifest_to_project_home, parse_project_package_manifest,
+        parse_temp_package_manifest,
+      },
     },
     releases::{Release, ReleaseFetchErr, check_latest_remote_release},
   },
@@ -134,9 +137,9 @@ pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult
 
   info!(
     "the latest remote frontend version is \"{}\"",
-    release.verion
+    release.version
   );
-  let (local_version, remote_version) = check_release_against_local_one(&release).await?;
+  let (local_version, remote_version) = check_release_against_local_one(&release).await;
   match local_version {
     Some(local) => {
       if local >= remote_version {
@@ -177,18 +180,16 @@ fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   Ok(())
 }
 
-async fn check_release_against_local_one(
-  release: &Release,
-) -> Result<(Option<Semver>, Semver), FrontendPkgErr> {
-  let release_semver = Semver::try_from(&release.name).map_err(FrontendPkgErr::ManifestInvalid)?;
+pub async fn check_release_against_local_one(release: &Release) -> (Option<Semver>, Semver) {
+  let release_semver = release.version;
   let project_manifest = match parse_project_package_manifest().await {
     Ok(m) => m,
     Err(err) => {
       warn!("could not parse existing frontend package manifest: {err}");
-      return Ok((None, release_semver));
+      return (None, release_semver);
     }
   };
-  Ok((Some(project_manifest.version_info.version), release_semver))
+  (Some(project_manifest.version_info.version), release_semver)
 }
 
 async fn check_new_pkg_manifest_against_local_one() -> Result<(), FrontendPkgErr> {
