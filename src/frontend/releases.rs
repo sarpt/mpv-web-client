@@ -1,5 +1,6 @@
 use std::{fmt::Display, path::PathBuf};
 
+use hyper::StatusCode;
 use reqwest::{Client, IntoUrl, Request};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -69,21 +70,33 @@ pub struct Release {
   pub download: Option<ReleaseDownloadInfo>,
 }
 
-const LATEST_RELEASES_URL: &str =
-  "https://api.github.com/repos/sarpt/mpv-web-front/releases/latest";
-pub async fn check_latest_remote_release() -> Result<Release, ReleaseFetchErr> {
-  let client = Client::new();
-  let request = get_request(&client, LATEST_RELEASES_URL)?;
+#[derive(Debug, Clone, Copy)]
+pub enum Version {
+  Latest,
+  Semver(Semver),
+}
 
-  let response_text = client
+const RELEASES_URL: &str = "https://api.github.com/repos/sarpt/mpv-web-front/releases";
+pub async fn get_remote_release(version: Version) -> Result<Release, ReleaseFetchErr> {
+  let client = Client::new();
+
+  let url = match version {
+    Version::Latest => format!("{RELEASES_URL}/latest"),
+    Version::Semver(semver) => format!("{RELEASES_URL}/tags/{semver}"),
+  };
+  let request = get_request(&client, &url)?;
+
+  let response = client
     .execute(request)
     .await
-    .map_err(ReleaseFetchErr::RemoteFetchFailed)?
-    .text()
-    .await
-    .map_err(|err| {
-      ReleaseFetchErr::ResponseParseFailure(format!("could not retrieve text response : {err}"))
-    })?;
+    .map_err(ReleaseFetchErr::RemoteFetchFailed)?;
+  if response.status() != StatusCode::OK {
+    return Err(ReleaseFetchErr::NotFound(version));
+  }
+
+  let response_text = response.text().await.map_err(|err| {
+    ReleaseFetchErr::ResponseParseFailure(format!("could not retrieve text response : {err}"))
+  })?;
 
   let response: RemoteRelease = serde_json::from_str(&response_text).map_err(|err| {
     ReleaseFetchErr::ResponseParseFailure(format!("response has invalid JSON: {err}"))
@@ -170,6 +183,7 @@ pub enum ReleaseFetchErr {
   SizeMismatch(usize, usize),
   WriteToDiskFailed(std::io::Error),
   RemoteFetchFailed(reqwest::Error),
+  NotFound(Version),
   ResponseParseFailure(String),
 }
 
@@ -180,6 +194,7 @@ impl Display for ReleaseFetchErr {
       ReleaseFetchErr::WriteToDiskFailed(err) => write!(f, "could not write file to disk: {err}"),
       ReleaseFetchErr::RemoteFetchFailed(err) => write!(f, "could not fetch package file: {err}"),
       ReleaseFetchErr::ResponseParseFailure(msg) => write!(f, "{msg}"),
+      ReleaseFetchErr::NotFound(version) => write!(f, "could not fetch version {version:?}"),
       ReleaseFetchErr::SizeMismatch(written, declared) => write!(
         f,
         "expected package size of {declared} bytes but only {written} bytes written"

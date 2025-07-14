@@ -15,7 +15,7 @@ use crate::{
         parse_temp_package_manifest,
       },
     },
-    releases::{Release, ReleaseFetchErr, check_latest_remote_release},
+    releases::{Release, ReleaseFetchErr, Version, get_remote_release},
   },
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
 };
@@ -131,7 +131,7 @@ pub enum RemoteReleaseCheckResult {
   RemoteNecessary(Release),
 }
 pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult, FrontendPkgErr> {
-  let release = check_latest_remote_release()
+  let release = get_remote_release(Version::Latest)
     .await
     .map_err(FrontendPkgErr::RemoteReleaseCheckFailure)?;
 
