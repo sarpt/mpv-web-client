@@ -1,8 +1,9 @@
 use http_body_util::BodyExt;
 use hyper::{Method, Request};
 use route_recognizer::Router;
+use serde::Deserialize;
 
-use crate::frontend::releases::Release;
+use crate::common::semver::Semver;
 
 enum PathRoutes {
   Frontend,
@@ -21,7 +22,7 @@ pub enum Routes {
 
 pub enum ApiRoutes {
   FrontendLatest,
-  FrontendUpdate(Release),
+  FrontendUpdate(Semver),
 }
 
 pub enum RoutingErr {
@@ -70,11 +71,17 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
         let request_string = String::from_utf8(body_bytes.into())
           .map_err(|err| RoutingErr::InvalidRequest(format!("invalid body: {err}")))?;
 
-        let release: Release = serde_json::from_slice(request_string.as_ref()).map_err(|err| {
-          RoutingErr::InvalidRequest(format!("incorrect release provided: {err}"))
-        })?;
-        Ok(Routes::Api(ApiRoutes::FrontendUpdate(release)))
+        let request: FrontendUpdateRequest = serde_json::from_str(request_string.as_ref())
+          .map_err(|err| {
+            RoutingErr::InvalidRequest(format!("incorrect version provided: {err}"))
+          })?;
+        Ok(Routes::Api(ApiRoutes::FrontendUpdate(request.version)))
       }
     },
   }
+}
+
+#[derive(Deserialize)]
+struct FrontendUpdateRequest {
+  version: Semver,
 }

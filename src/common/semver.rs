@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
 pub struct Semver {
   major: usize,
   minor: usize,
