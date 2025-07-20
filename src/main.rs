@@ -56,7 +56,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
   init_frontend(&args)
     .await
     .map_err(|err_msg| *Box::new(err_msg))?;
-  serve().await
+  if let Err(err) = serve().await {
+    error!("error encountered while serving: {err}");
+    return Err(err);
+  }
+
+  Ok(())
 }
 
 async fn init_frontend(args: &Args) -> Result<(), String> {

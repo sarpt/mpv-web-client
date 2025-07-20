@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::time::Duration;
 
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
@@ -7,7 +8,11 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
+use hyper_util::server::graceful;
+use log::info;
 use tokio::net::TcpListener;
+use tokio::select;
+use tokio::time::sleep;
 
 use crate::server::api::{check_latest_frontend_release, update_frontend_package};
 use crate::server::common::{ServiceError, empty_body, full_body};
@@ -21,20 +26,42 @@ mod router;
 
 const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
+const GRACEFUL_SHUTDOWN_TIMEOUT_SEC: u64 = 30;
 
 pub async fn serve() -> Result<(), Box<dyn Error>> {
   let addr = SocketAddr::from((Ipv4Addr::from(DEFAULT_IPADDR), DEFAULT_PORT));
   let listener = TcpListener::bind(addr).await?;
+  let graceful = graceful::GracefulShutdown::new();
 
+  info!("accepting connections at {addr}");
   loop {
-    let (stream, _) = listener.accept().await?;
+    select! {
+      Ok((stream, incoming_addr)) = listener.accept() => {
+        info!("accepted connection from {incoming_addr}");
 
-    tokio::task::spawn(async {
-      let io = TokioIo::new(stream);
-      let runner = auto::Builder::new(TokioExecutor::new());
-      _ = runner.serve_connection(io, service_fn(service)).await;
-    });
+        tokio::task::spawn(async {
+          let io = TokioIo::new(stream);
+          let runner = auto::Builder::new(TokioExecutor::new());
+          _ = runner.serve_connection(io, service_fn(service)).await;
+        });
+      }
+      _ = tokio::signal::ctrl_c() => {
+        drop(listener);
+        break;
+      }
+    }
   }
+
+  select! {
+    _ = graceful.shutdown() => {
+      info!("server shut down gracefully")
+    },
+    _ = sleep(Duration::from_secs(GRACEFUL_SHUTDOWN_TIMEOUT_SEC)) => {
+      return Err(*Box::new(format!("could not finish graceful shutdown in {GRACEFUL_SHUTDOWN_TIMEOUT_SEC} seconds").into()));
+    }
+  }
+
+  Ok(())
 }
 
 async fn service(
