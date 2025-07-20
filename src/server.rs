@@ -17,7 +17,9 @@ use tokio::select;
 use tokio::sync::Notify;
 use tokio::time::sleep;
 
-use crate::server::api::{check_latest_frontend_release, update_frontend_package};
+use crate::server::api::{
+  check_latest_frontend_release, trigger_shutdown, update_frontend_package,
+};
 use crate::server::common::{ServiceError, empty_body, full_body};
 use crate::server::frontend::serve_frontend;
 use crate::server::router::get_route;
@@ -30,7 +32,7 @@ mod router;
 const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
 const GRACEFUL_SHUTDOWN_TIMEOUT_SEC: u64 = 30;
-const REQUEST_TIMEOUT: u64 = 60;
+const IDLE_SHUTDOWN_TIMEOUT: u64 = 60;
 
 pub async fn serve() -> Result<(), Box<dyn Error>> {
   let addr = SocketAddr::from((Ipv4Addr::from(DEFAULT_IPADDR), DEFAULT_PORT));
@@ -40,7 +42,7 @@ pub async fn serve() -> Result<(), Box<dyn Error>> {
 
   info!("accepting connections at {addr}");
   loop {
-    let notify = main_service_shutdown_notifier.clone();
+    let shutdown_notifier = main_service_shutdown_notifier.clone();
 
     select! {
       Ok((stream, incoming_addr)) = listener.accept() => {
@@ -49,10 +51,10 @@ pub async fn serve() -> Result<(), Box<dyn Error>> {
         tokio::task::spawn(async move {
           let io = TokioIo::new(stream);
           let runner = auto::Builder::new(TokioExecutor::new());
-          _ = runner.serve_connection(io, service_fn(|req| { service(req) })).await;
+          _ = runner.serve_connection(io, service_fn(|req| { service(req, shutdown_notifier.clone()) })).await;
         });
       }
-      _ = shutdown_handler(notify) => {
+      _ = wait_for_shutdown_condition(shutdown_notifier.clone()) => {
         drop(listener);
         break;
       }
@@ -71,24 +73,30 @@ pub async fn serve() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-async fn shutdown_handler<T>(service_shutdown_notify: T)
+async fn wait_for_shutdown_condition<T>(service_shutdown_notify: T)
 where
   T: Deref<Target = Notify>,
 {
   select! {
-    _ = service_shutdown_notify.notified() => {}
+    _ = service_shutdown_notify.notified() => {
+      info!("triggering shutdown due to shutdown request")
+    }
     _ = tokio::signal::ctrl_c() => {
       info!("triggering shutdown due to SIGINT signal")
     }
-    _ = sleep(Duration::from_secs(REQUEST_TIMEOUT)) => {
-      info!("triggering shutdown since no request has been received for {REQUEST_TIMEOUT} seconds")
+    _ = sleep(Duration::from_secs(IDLE_SHUTDOWN_TIMEOUT)) => {
+      info!("triggering shutdown since no request has been received for {IDLE_SHUTDOWN_TIMEOUT} seconds")
     }
   }
 }
 
-async fn service(
+async fn service<T>(
   req: Request<hyper::body::Incoming>,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
+  shutdown_notifier: T,
+) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
+where
+  T: Deref<Target = Notify>,
+{
   let route = get_route(req).await;
 
   match route {
@@ -97,6 +105,7 @@ async fn service(
       router::Routes::Api(api_route) => match api_route {
         router::ApiRoutes::FrontendLatest => check_latest_frontend_release().await,
         router::ApiRoutes::FrontendUpdate(release) => update_frontend_package(release).await,
+        router::ApiRoutes::Shutdown => trigger_shutdown(shutdown_notifier).await,
       },
     },
     Err(err) => {

@@ -13,6 +13,7 @@ enum PathRoutes {
 enum ApiPathRoutes {
   FrontendLatest,
   FrontendUpdate,
+  Shutdown,
 }
 
 pub enum Routes {
@@ -23,6 +24,7 @@ pub enum Routes {
 pub enum ApiRoutes {
   FrontendLatest,
   FrontendUpdate(Semver),
+  Shutdown,
 }
 
 pub enum RoutingErr {
@@ -41,6 +43,7 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
     "/api/frontend/update",
     PathRoutes::Api(ApiPathRoutes::FrontendUpdate),
   );
+  router.add("/api/shutdown", PathRoutes::Api(ApiPathRoutes::Shutdown));
   router.add("/*path", PathRoutes::Frontend);
   router.add("/", PathRoutes::Frontend);
 
@@ -56,6 +59,7 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
       routes.params().find("path").map(|val| val.to_owned()),
     )),
     PathRoutes::Api(api_path) => match api_path {
+      ApiPathRoutes::Shutdown => Ok(Routes::Api(ApiRoutes::Shutdown)),
       ApiPathRoutes::FrontendLatest => Ok(Routes::Api(ApiRoutes::FrontendLatest)),
       ApiPathRoutes::FrontendUpdate => {
         if req.method() != Method::POST {
