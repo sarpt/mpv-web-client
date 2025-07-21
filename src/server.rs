@@ -32,9 +32,8 @@ mod router;
 const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
 const GRACEFUL_SHUTDOWN_TIMEOUT_SEC: u64 = 30;
-const IDLE_SHUTDOWN_TIMEOUT: u64 = 60;
 
-pub async fn serve() -> Result<(), Box<dyn Error>> {
+pub async fn serve(idle_shutdown_timeout: u64) -> Result<(), Box<dyn Error>> {
   let addr = SocketAddr::from((Ipv4Addr::from(DEFAULT_IPADDR), DEFAULT_PORT));
   let listener = TcpListener::bind(addr).await?;
   let graceful = graceful::GracefulShutdown::new();
@@ -54,7 +53,7 @@ pub async fn serve() -> Result<(), Box<dyn Error>> {
           _ = runner.serve_connection(io, service_fn(|req| { service(req, shutdown_notifier.clone()) })).await;
         });
       }
-      _ = wait_for_shutdown_condition(shutdown_notifier.clone()) => {
+      _ = wait_for_shutdown_condition(shutdown_notifier.clone(), idle_shutdown_timeout) => {
         drop(listener);
         break;
       }
@@ -73,7 +72,7 @@ pub async fn serve() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-async fn wait_for_shutdown_condition<T>(service_shutdown_notify: T)
+async fn wait_for_shutdown_condition<T>(service_shutdown_notify: T, idle_shutdown_timeout: u64)
 where
   T: Deref<Target = Notify>,
 {
@@ -84,8 +83,8 @@ where
     _ = tokio::signal::ctrl_c() => {
       info!("triggering shutdown due to SIGINT signal")
     }
-    _ = sleep(Duration::from_secs(IDLE_SHUTDOWN_TIMEOUT)) => {
-      info!("triggering shutdown since no request has been received for {IDLE_SHUTDOWN_TIMEOUT} seconds")
+    _ = sleep(Duration::from_secs(idle_shutdown_timeout)) => {
+      info!("triggering shutdown since no request has been received for {idle_shutdown_timeout} seconds")
     }
   }
 }

@@ -16,6 +16,8 @@ mod frontend;
 mod project_paths;
 mod server;
 
+const DEFAULT_IDLE_SHUTDOWN_TIMEOUT: u64 = 60;
+
 #[derive(Parser, Debug)]
 #[command(version = "0.1.0", about = "client for mpv-web-api and mpv-web-front server", long_about = None)]
 struct Args {
@@ -43,6 +45,15 @@ struct Args {
     help = "Force installation of provided outdated frontend package with --pkg, even if the newer package is already being served."
   )]
   force_outdated: bool,
+
+  #[arg(
+    action,
+    default_value_t = DEFAULT_IDLE_SHUTDOWN_TIMEOUT,
+    long,
+    required = false,
+    help = "Time in seconds after which server will shutdown when idle. Any incoming request to server will reset this interval."
+  )]
+  idle_shutdown_timeout: u64,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -56,7 +67,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
   init_frontend(&args)
     .await
     .map_err(|err_msg| *Box::new(err_msg))?;
-  if let Err(err) = serve().await {
+  if let Err(err) = serve(args.idle_shutdown_timeout).await {
     error!("error encountered while serving: {err}");
     return Err(err);
   }
