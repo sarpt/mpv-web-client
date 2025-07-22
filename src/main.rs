@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 
 use crate::{
   frontend::{
-    RemoteReleaseCheckResult, check_for_newer_remote_release, check_frontend_pkg, install_package,
+    RemoteReleaseCheckResult, check_for_newer_remote_release, check_frontend_pkg,
     pkg::repository::PackagesRepository,
     releases::{Release, fetch_remote_frontend_package_release},
   },
@@ -116,7 +116,8 @@ async fn init_frontend(
   }
 
   if let Some(ref path) = pkg_path {
-    install_package(path.to_owned(), args.force_outdated, pkgs_repository)
+    pkgs_repository
+      .install_package(path.to_owned(), args.force_outdated)
       .await
       .map_err(|err| format!("frontend package install failed: {err}"))?;
   }

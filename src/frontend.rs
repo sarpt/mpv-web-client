@@ -1,71 +1,21 @@
 use log::{info, warn};
 use std::{
   fmt::Display,
-  fs::{create_dir_all, exists},
+  fs::exists,
   path::{Path, PathBuf},
 };
 
 use crate::{
   common::semver::Semver,
   frontend::{
-    pkg::{
-      extraction::extract_frontend_pkg,
-      manifest::{
-        PKG_MANIFEST_NAME, move_manifest_to_project_home, parse_project_package_manifest,
-      },
-      repository::PackagesRepository,
-    },
+    pkg::manifest::{PKG_MANIFEST_NAME, parse_project_package_manifest},
     releases::{Release, ReleaseFetchErr, Version, get_remote_release},
   },
-  project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
+  project_paths::{get_frontend_dir, get_project_home_dir},
 };
 
 pub mod pkg;
 pub mod releases;
-
-pub async fn install_package<T>(
-  pkg_path: T,
-  force_outdated: bool,
-  pkgs_repository: &mut PackagesRepository,
-) -> Result<(), FrontendPkgErr>
-where
-  T: AsRef<Path> + Send + Sync + 'static,
-{
-  tokio::task::spawn_blocking(|| extract_frontend_pkg(pkg_path))
-    .await
-    .map_err(|e| {
-      FrontendPkgErr::PkgInstallFailed(format!(
-        "issue with joining on blocking task for frontend extraction: {e}"
-      ))
-    })??;
-
-  match check_new_pkg_manifest_against_local_one(pkgs_repository).await {
-    Ok(()) => {}
-    Err(err) => {
-      match &err {
-        FrontendPkgErr::PkgOutdated(provided_version, served_version) => {
-          if force_outdated {
-            info!("forcing outdated version \"{provided_version}\" over \"{served_version}\"");
-          } else {
-            return Err(err);
-          }
-        }
-        _ => {
-          return Err(err);
-        }
-      };
-    }
-  };
-  tokio::task::spawn_blocking(move_frontend_pkg_to_home)
-    .await
-    .map_err(|e| {
-      FrontendPkgErr::PkgInstallFailed(format!(
-        "issue with joining on blocking task for frontend move: {e}"
-      ))
-    })??;
-  move_manifest_to_project_home().await?;
-  Ok(())
-}
 
 pub fn check_frontend_pkg<T>(pkg_path: Option<T>) -> Result<(), FrontendPkgErr>
 where
@@ -143,7 +93,7 @@ pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult
     "the latest remote frontend version is \"{}\"",
     release.version
   );
-  let (local_version, remote_version) = check_release_against_local_one(&release).await;
+  let (local_version, remote_version) = check_release_against_installed_package(&release).await;
   match local_version {
     Some(local) => {
       if local >= remote_version {
@@ -162,29 +112,9 @@ pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult
   }
 }
 
-fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
-  let frontend_temp_dir = get_frontend_temp_dir();
-  let project_dir = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-  for entry_result in walkdir::WalkDir::new(frontend_temp_dir) {
-    let entry = match entry_result {
-      Ok(e) => e,
-      Err(err) => return Err(FrontendPkgErr::PkgUnpackErr(err.into())),
-    };
-
-    let mut tgt_path = project_dir.clone();
-    let stripped_path = entry.path().strip_prefix(get_temp_dir()).unwrap();
-    tgt_path.push(stripped_path);
-    if entry.file_type().is_dir() {
-      create_dir_all(tgt_path).map_err(FrontendPkgErr::PkgUnpackErr)?;
-    } else if entry.file_type().is_file() {
-      std::fs::copy(entry.path(), tgt_path).map_err(FrontendPkgErr::HomeDirInaccessible)?;
-    }
-  }
-
-  Ok(())
-}
-
-pub async fn check_release_against_local_one(release: &Release) -> (Option<Semver>, Semver) {
+pub async fn check_release_against_installed_package(
+  release: &Release,
+) -> (Option<Semver>, Semver) {
   let release_semver = release.version;
   let project_manifest = match parse_project_package_manifest().await {
     Ok(m) => m,
@@ -194,32 +124,6 @@ pub async fn check_release_against_local_one(release: &Release) -> (Option<Semve
     }
   };
   (Some(project_manifest.version_info.version), release_semver)
-}
-
-async fn check_new_pkg_manifest_against_local_one(
-  pkgs_repository: &mut PackagesRepository,
-) -> Result<(), FrontendPkgErr> {
-  let temp_version = pkgs_repository
-    .get_temp()
-    .await?
-    .manifest
-    .version_info
-    .version;
-  let local_version = match pkgs_repository.get_installed().await {
-    Ok(pkg) => pkg.manifest.version_info.version,
-    Err(err) => {
-      warn!("could not parse existing frontend package manifest: {err}");
-      return Ok(());
-    }
-  };
-
-  if temp_version < local_version {
-    return Err(FrontendPkgErr::PkgOutdated(
-      temp_version.into(),
-      local_version.into(),
-    ));
-  }
-  Ok(())
 }
 
 pub enum FrontendPkgErr {
