@@ -8,6 +8,7 @@ use serde::Serialize;
 use tokio::sync::Notify;
 
 use crate::common::semver::Semver;
+use crate::frontend::pkg::repository::PackagesRepository;
 use crate::frontend::releases::{
   Release, Version, fetch_remote_frontend_package_release, get_remote_release,
 };
@@ -60,6 +61,7 @@ pub async fn check_latest_frontend_release()
 
 pub async fn update_frontend_package(
   version: Semver,
+  pkgs_repo: &mut PackagesRepository,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
   let release = match get_remote_release(Version::Semver(version)).await {
     Ok(release) => release,
@@ -86,7 +88,7 @@ pub async fn update_frontend_package(
   };
 
   const FORCE_OUTDATED: bool = true; // TODO: this should be provided from frontend. atm always force outdated pkg
-  match install_package(path, FORCE_OUTDATED).await {
+  match install_package(path, FORCE_OUTDATED, pkgs_repo).await {
     Ok(()) => {
       let response = Response::new(empty_body());
       Ok(response)

@@ -1,10 +1,12 @@
 use clap::Parser;
 use log::{debug, error, info, warn};
-use std::{error::Error, path::PathBuf, time::SystemTime};
+use std::{error::Error, path::PathBuf, sync::Arc, time::SystemTime};
+use tokio::sync::Mutex;
 
 use crate::{
   frontend::{
     RemoteReleaseCheckResult, check_for_newer_remote_release, check_frontend_pkg, install_package,
+    pkg::repository::PackagesRepository,
     releases::{Release, fetch_remote_frontend_package_release},
   },
   project_paths::ensure_project_dirs,
@@ -73,7 +75,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
   debug!("version {VERSION}");
 
   ensure_project_dirs()?;
-  init_frontend(&args)
+  let mut packages_repository = PackagesRepository::new();
+  init_frontend(&args, &mut packages_repository)
     .await
     .map_err(|err_msg| *Box::new(err_msg))?;
   let idle_shutdown_interval = if args.enable_idle_shutdown_timeout {
@@ -85,7 +88,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
   } else {
     None
   };
-  if let Err(err) = serve(idle_shutdown_interval).await {
+
+  let server_dependencies = server::Dependencies {
+    packages_repository: Arc::new(Mutex::new(packages_repository)),
+  };
+  if let Err(err) = serve(idle_shutdown_interval, server_dependencies).await {
     error!("error encountered while serving: {err}");
     return Err(err);
   }
@@ -93,7 +100,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-async fn init_frontend(args: &Args) -> Result<(), String> {
+async fn init_frontend(
+  args: &Args,
+  pkgs_repository: &mut PackagesRepository,
+) -> Result<(), String> {
   let mut pkg_path = args.pkg.to_owned();
   if pkg_path.is_none() {
     if let Some(new_release) = remote_frontend_release_available(args.update).await {
@@ -106,7 +116,7 @@ async fn init_frontend(args: &Args) -> Result<(), String> {
   }
 
   if let Some(ref path) = pkg_path {
-    install_package(path.to_owned(), args.force_outdated)
+    install_package(path.to_owned(), args.force_outdated, pkgs_repository)
       .await
       .map_err(|err| format!("frontend package install failed: {err}"))?;
   }

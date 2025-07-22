@@ -12,18 +12,22 @@ use crate::{
       extraction::extract_frontend_pkg,
       manifest::{
         PKG_MANIFEST_NAME, move_manifest_to_project_home, parse_project_package_manifest,
-        parse_temp_package_manifest,
       },
+      repository::PackagesRepository,
     },
     releases::{Release, ReleaseFetchErr, Version, get_remote_release},
   },
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
 };
 
-mod pkg;
+pub mod pkg;
 pub mod releases;
 
-pub async fn install_package<T>(pkg_path: T, force_outdated: bool) -> Result<(), FrontendPkgErr>
+pub async fn install_package<T>(
+  pkg_path: T,
+  force_outdated: bool,
+  pkgs_repository: &mut PackagesRepository,
+) -> Result<(), FrontendPkgErr>
 where
   T: AsRef<Path> + Send + Sync + 'static,
 {
@@ -35,7 +39,7 @@ where
       ))
     })??;
 
-  match check_new_pkg_manifest_against_local_one().await {
+  match check_new_pkg_manifest_against_local_one(pkgs_repository).await {
     Ok(()) => {}
     Err(err) => {
       match &err {
@@ -192,20 +196,27 @@ pub async fn check_release_against_local_one(release: &Release) -> (Option<Semve
   (Some(project_manifest.version_info.version), release_semver)
 }
 
-async fn check_new_pkg_manifest_against_local_one() -> Result<(), FrontendPkgErr> {
-  let temp_manifest = parse_temp_package_manifest().await?;
-  let project_manifest = match parse_project_package_manifest().await {
-    Ok(m) => m,
+async fn check_new_pkg_manifest_against_local_one(
+  pkgs_repository: &mut PackagesRepository,
+) -> Result<(), FrontendPkgErr> {
+  let temp_version = pkgs_repository
+    .get_temp()
+    .await?
+    .manifest
+    .version_info
+    .version;
+  let local_version = match pkgs_repository.get_installed().await {
+    Ok(pkg) => pkg.manifest.version_info.version,
     Err(err) => {
       warn!("could not parse existing frontend package manifest: {err}");
       return Ok(());
     }
   };
 
-  if temp_manifest.version_info.version < project_manifest.version_info.version {
+  if temp_version < local_version {
     return Err(FrontendPkgErr::PkgOutdated(
-      temp_manifest.version_info.version.into(),
-      project_manifest.version_info.version.into(),
+      temp_version.into(),
+      local_version.into(),
     ));
   }
   Ok(())
