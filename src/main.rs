@@ -1,5 +1,5 @@
 use clap::Parser;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use std::{error::Error, path::PathBuf, time::SystemTime};
 
 use crate::{
@@ -16,8 +16,11 @@ mod frontend;
 mod project_paths;
 mod server;
 
+const DEFAULT_IDLE_SHUTDOWN_TIMEOUT: u8 = 60;
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Parser, Debug)]
-#[command(version = "0.1.0", about = "client for mpv-web-api and mpv-web-front server", long_about = None)]
+#[command(version = VERSION, about = "client for mpv-web-api and mpv-web-front server", long_about = None)]
 struct Args {
   #[arg(
     long,
@@ -43,6 +46,23 @@ struct Args {
     help = "Force installation of provided outdated frontend package with --pkg, even if the newer package is already being served."
   )]
   force_outdated: bool,
+
+  #[arg(
+    action,
+    default_value_t = DEFAULT_IDLE_SHUTDOWN_TIMEOUT.into(),
+    long,
+    required = false,
+    help = "Time in seconds after which server will shutdown when idle. Any incoming request to server will reset this interval. Does not apply when --enable-idle-shutdown-timeout is not set."
+  )]
+  idle_shutdown_timeout: u32,
+
+  #[arg(
+    action,
+    long,
+    required = false,
+    help = "Enables server idle timeout mechanism which shuts server down when the server does not receive any requests in specified timeout interval."
+  )]
+  enable_idle_shutdown_timeout: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -50,13 +70,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
   let args = Args::parse();
 
   init_logging()?;
-  debug!("version {}", env!("CARGO_PKG_VERSION"));
+  debug!("version {VERSION}");
 
   ensure_project_dirs()?;
   init_frontend(&args)
     .await
     .map_err(|err_msg| *Box::new(err_msg))?;
-  serve().await
+  let idle_shutdown_interval = if args.enable_idle_shutdown_timeout {
+    warn!(
+      "server will shut down after being idle for {} seconds!",
+      args.idle_shutdown_timeout
+    );
+    Some(args.idle_shutdown_timeout)
+  } else {
+    None
+  };
+  if let Err(err) = serve(idle_shutdown_interval).await {
+    error!("error encountered while serving: {err}");
+    return Err(err);
+  }
+
+  Ok(())
 }
 
 async fn init_frontend(args: &Args) -> Result<(), String> {

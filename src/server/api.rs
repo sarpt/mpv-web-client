@@ -1,8 +1,11 @@
+use std::ops::Deref;
+
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
 use hyper::header::HeaderValue;
 use hyper::{Response, StatusCode};
 use serde::Serialize;
+use tokio::sync::Notify;
 
 use crate::common::semver::Semver;
 use crate::frontend::releases::{
@@ -97,4 +100,15 @@ pub async fn update_frontend_package(
       Ok(response)
     }
   }
+}
+
+pub async fn trigger_shutdown<T>(
+  notifier: T,
+) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
+where
+  T: Deref<Target = Notify>,
+{
+  notifier.notify_waiters();
+  let response = Response::new(empty_body());
+  Ok(response)
 }
