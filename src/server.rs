@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,9 +14,10 @@ use hyper_util::server::graceful;
 use log::{debug, info};
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
 use tokio::time::sleep;
 
+use crate::frontend::pkg::repository::PackagesRepository;
 use crate::server::api::{
   check_latest_frontend_release, trigger_shutdown, update_frontend_package,
 };
@@ -33,7 +34,15 @@ const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
 const GRACEFUL_SHUTDOWN_TIMEOUT_SEC: u8 = 30;
 
-pub async fn serve(idle_shutdown_timeout: Option<u32>) -> Result<(), Box<dyn Error>> {
+#[derive(Clone)]
+pub struct Dependencies {
+  pub packages_repository: Arc<Mutex<PackagesRepository>>,
+}
+
+pub async fn serve(
+  idle_shutdown_timeout: Option<u32>,
+  dependencies: Dependencies,
+) -> Result<(), Box<dyn Error>> {
   let addr = SocketAddr::from((Ipv4Addr::from(DEFAULT_IPADDR), DEFAULT_PORT));
   let listener = TcpListener::bind(addr).await?;
   let graceful = graceful::GracefulShutdown::new();
@@ -47,10 +56,11 @@ pub async fn serve(idle_shutdown_timeout: Option<u32>) -> Result<(), Box<dyn Err
       Ok((stream, incoming_addr)) = listener.accept() => {
         debug!("accepted connection from {incoming_addr}");
 
+        let deps = dependencies.clone();
         tokio::task::spawn(async move {
           let io = TokioIo::new(stream);
           let runner = auto::Builder::new(TokioExecutor::new());
-          _ = runner.serve_connection(io, service_fn(|req| { service(req, shutdown_notifier.clone()) })).await;
+          _ = runner.serve_connection(io, service_fn(|req| { service(req, shutdown_notifier.clone(), deps.clone()) })).await;
         });
       }
       _ = wait_for_shutdown_condition(shutdown_notifier.clone(), idle_shutdown_timeout) => {
@@ -94,18 +104,27 @@ async fn wait_for_shutdown_condition<T>(
 async fn service<T>(
   req: Request<hyper::body::Incoming>,
   shutdown_notifier: T,
+  dependencies: Dependencies,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
 where
   T: Deref<Target = Notify>,
 {
   let route = get_route(req).await;
-
   match route {
     Ok(r) => match r {
       router::Routes::Frontend(name) => serve_frontend(name.as_deref()).await,
       router::Routes::Api(api_route) => match api_route {
-        router::ApiRoutes::FrontendLatest => check_latest_frontend_release().await,
-        router::ApiRoutes::FrontendUpdate(release) => update_frontend_package(release).await,
+        router::ApiRoutes::FrontendLatest => {
+          check_latest_frontend_release(dependencies.packages_repository.lock().await.deref_mut())
+            .await
+        }
+        router::ApiRoutes::FrontendUpdate(release) => {
+          update_frontend_package(
+            release,
+            dependencies.packages_repository.lock().await.deref_mut(),
+          )
+          .await
+        }
         router::ApiRoutes::Shutdown => trigger_shutdown(shutdown_notifier).await,
       },
     },

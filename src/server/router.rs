@@ -32,6 +32,7 @@ pub enum RoutingErr {
   InvalidMethod,
   InvalidRequest(String),
 }
+
 pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, RoutingErr> {
   let mut router = Router::new();
 
