@@ -8,7 +8,7 @@ use std::{
 use crate::{
   common::semver::Semver,
   frontend::{
-    pkg::manifest::{PKG_MANIFEST_NAME, parse_project_package_manifest},
+    pkg::{manifest::PKG_MANIFEST_NAME, repository::PackagesRepository},
     releases::{Release, ReleaseFetchErr, Version, get_remote_release},
   },
   project_paths::{get_frontend_dir, get_project_home_dir},
@@ -84,7 +84,9 @@ pub enum RemoteReleaseCheckResult {
   NewerRemoteAvailable(Release),
   RemoteNecessary(Release),
 }
-pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult, FrontendPkgErr> {
+pub async fn check_for_newer_remote_release(
+  pkgs_repo: &mut PackagesRepository,
+) -> Result<RemoteReleaseCheckResult, FrontendPkgErr> {
   let release = get_remote_release(Version::Latest)
     .await
     .map_err(FrontendPkgErr::RemoteReleaseCheckFailure)?;
@@ -93,37 +95,23 @@ pub async fn check_for_newer_remote_release() -> Result<RemoteReleaseCheckResult
     "the latest remote frontend version is \"{}\"",
     release.version
   );
-  let (local_version, remote_version) = check_release_against_installed_package(&release).await;
-  match local_version {
-    Some(local) => {
-      if local >= remote_version {
-        Ok(RemoteReleaseCheckResult::UpToDate(local))
-      } else {
-        info!(
-          "local frontend version \"{local}\" is outdated, the newer remote version is \"{remote_version}\""
-        );
-        Ok(RemoteReleaseCheckResult::NewerRemoteAvailable(release))
-      }
-    }
-    None => {
+  let remote_version = release.version;
+  let local_version = match pkgs_repo.get_installed().await {
+    Ok(installed) => installed.manifest.version_info.version,
+    Err(_) => {
       warn!("could not infer local frontend package version");
-      Ok(RemoteReleaseCheckResult::RemoteNecessary(release))
-    }
-  }
-}
-
-pub async fn check_release_against_installed_package(
-  release: &Release,
-) -> (Option<Semver>, Semver) {
-  let release_semver = release.version;
-  let project_manifest = match parse_project_package_manifest().await {
-    Ok(m) => m,
-    Err(err) => {
-      warn!("could not parse existing frontend package manifest: {err}");
-      return (None, release_semver);
+      return Ok(RemoteReleaseCheckResult::RemoteNecessary(release));
     }
   };
-  (Some(project_manifest.version_info.version), release_semver)
+
+  if local_version >= remote_version {
+    Ok(RemoteReleaseCheckResult::UpToDate(local_version))
+  } else {
+    info!(
+      "local frontend version \"{local_version}\" is outdated, the newer remote version is \"{remote_version}\""
+    );
+    Ok(RemoteReleaseCheckResult::NewerRemoteAvailable(release))
+  }
 }
 
 pub enum FrontendPkgErr {

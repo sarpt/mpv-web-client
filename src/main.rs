@@ -106,7 +106,8 @@ async fn init_frontend(
 ) -> Result<(), String> {
   let mut pkg_path = args.pkg.to_owned();
   if pkg_path.is_none() {
-    if let Some(new_release) = remote_frontend_release_available(args.update).await {
+    if let Some(new_release) = remote_frontend_release_available(args.update, pkgs_repository).await
+    {
       info!(
         "fetching new frontend package version \"{}\"",
         new_release.name
@@ -128,8 +129,11 @@ async fn init_frontend(
   }
 }
 
-async fn remote_frontend_release_available(allow_updates: bool) -> Option<Release> {
-  match check_for_newer_remote_release().await {
+async fn remote_frontend_release_available(
+  allow_updates: bool,
+  pkgs_repository: &mut PackagesRepository,
+) -> Option<Release> {
+  match check_for_newer_remote_release(pkgs_repository).await {
     Ok(result) => match result {
       RemoteReleaseCheckResult::UpToDate(local) => {
         info!("local frontend version \"{local}\" is up to date");
