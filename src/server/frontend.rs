@@ -13,16 +13,21 @@ use crate::server::common::ServiceError;
 const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
 pub async fn serve_frontend(
   name: Option<&str>,
+  encodings: Vec<String>,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  let src_name = match name {
+  let mut src_name = String::from(match name {
     Some(name) => name,
     None => INDEX_FILE_NAME,
-  };
+  });
+
+  if let Some(ext) = decide_encoding_extension(encodings) {
+    src_name.push_str(ext);
+  }
+
   let (src_file, src_path) = match get_frontend_file(&src_name).await {
     Ok((src_file, src_path)) => (src_file, src_path),
     Err(err) => {
-      let name: &str = src_name;
-      if name == INDEX_FILE_NAME {
+      if src_name == INDEX_FILE_NAME {
         return Err(Box::new(err));
       }
 
@@ -51,4 +56,18 @@ pub async fn serve_frontend(
     HeaderValue::from_str(mime_type.as_ref()).unwrap(),
   );
   Ok(response)
+}
+
+const GZIP_EXT: &str = ".gz";
+const GZIP_ENCODING: &str = "gzip";
+const ANY_ENCODING: &str = "*";
+fn decide_encoding_extension(encodings: Vec<String>) -> Option<&'static str> {
+  let should_serve_gzip = encodings
+    .iter()
+    .any(|en| en == GZIP_ENCODING || en == ANY_ENCODING);
+  if should_serve_gzip {
+    Some(GZIP_EXT)
+  } else {
+    None
+  }
 }
