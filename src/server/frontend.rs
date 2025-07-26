@@ -4,6 +4,7 @@ use http_body_util::combinators::BoxBody;
 use hyper::Response;
 use hyper::body::{Bytes, Frame};
 use hyper::header::HeaderValue;
+use mime_guess::Mime;
 use tokio::io::BufReader;
 use tokio_util::io::ReaderStream;
 
@@ -20,7 +21,7 @@ pub async fn serve_frontend(
     None => INDEX_FILE_NAME,
   });
 
-  if let Some(ext) = decide_encoding_extension(encodings) {
+  if let Some(ext) = decide_encoding_extension(&src_name, encodings) {
     src_name.push_str(ext);
   }
 
@@ -61,7 +62,27 @@ pub async fn serve_frontend(
 const GZIP_EXT: &str = ".gz";
 const GZIP_ENCODING: &str = "gzip";
 const ANY_ENCODING: &str = "*";
-fn decide_encoding_extension(encodings: Vec<String>) -> Option<&'static str> {
+const ENCODABLE_MIMES: [Mime; 6] = [
+  mime_guess::mime::APPLICATION_JAVASCRIPT,
+  mime_guess::mime::APPLICATION_JAVASCRIPT_UTF_8,
+  mime_guess::mime::APPLICATION_OCTET_STREAM,
+  mime_guess::mime::TEXT_JAVASCRIPT,
+  mime_guess::mime::TEXT_HTML,
+  mime_guess::mime::TEXT_HTML_UTF_8,
+];
+
+fn decide_encoding_extension(name: &str, encodings: Vec<String>) -> Option<&'static str> {
+  let media_type = mime_guess::from_path(name);
+  let mime_type = media_type
+    .first()
+    .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
+  if ENCODABLE_MIMES
+    .iter()
+    .all(|encodable| mime_type != *encodable)
+  {
+    return None;
+  }
+
   let should_serve_gzip = encodings
     .iter()
     .any(|en| en == GZIP_ENCODING || en == ANY_ENCODING);
