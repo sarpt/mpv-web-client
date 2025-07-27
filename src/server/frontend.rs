@@ -1,9 +1,15 @@
+use std::collections::VecDeque;
+use std::path::PathBuf;
+
 use futures::StreamExt;
 use http_body_util::StreamBody;
 use http_body_util::combinators::BoxBody;
 use hyper::Response;
 use hyper::body::{Bytes, Frame};
 use hyper::header::HeaderValue;
+use log::debug;
+use mime_guess::Mime;
+use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio_util::io::ReaderStream;
 
@@ -13,42 +19,142 @@ use crate::server::common::ServiceError;
 const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
 pub async fn serve_frontend(
   name: Option<&str>,
+  encodings: Vec<String>,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  let src_name = match name {
-    Some(name) => name,
-    None => INDEX_FILE_NAME,
-  };
-  let (src_file, src_path) = match get_frontend_file(&src_name).await {
-    Ok((src_file, src_path)) => (src_file, src_path),
-    Err(err) => {
-      let name: &str = src_name;
-      if name == INDEX_FILE_NAME {
-        return Err(Box::new(err));
-      }
-
-      // fallback to index file on unmatched paths
-      // required for BrowserRouter in mpv-web-frontend
-      match get_frontend_file(INDEX_FILE_NAME).await {
-        Ok((src_file, src_path)) => (src_file, src_path),
-        Err(err) => return Err(Box::new(err)),
-      }
+  let file_to_serve = match decide_file_to_serve(name, &encodings).await {
+    Some(served_file_info) => served_file_info,
+    None => {
+      return Err(*Box::<ServiceError>::new(
+        "unable to serve any of the expected files for request"
+          .to_owned()
+          .into(),
+      ));
     }
   };
-  let reader = BufReader::with_capacity(STREAM_CHUNK_SIZE, src_file);
+
+  debug!("serving path \"{}\"", file_to_serve.path.to_string_lossy());
+  let reader = BufReader::with_capacity(STREAM_CHUNK_SIZE, file_to_serve.file);
   let reader_stream = ReaderStream::new(reader).map(|chunk| match chunk {
     Ok(bytes) => Ok(Frame::data(bytes)),
     Err(err) => Err(Box::new(err).into()),
   });
 
-  let media_type = mime_guess::from_path(&src_path);
-  let mime_type = media_type
-    .first()
-    .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
-
   let mut response = Response::new(BoxBody::new(StreamBody::new(reader_stream)));
   response.headers_mut().append(
     "Content-Type",
-    HeaderValue::from_str(mime_type.as_ref()).unwrap(),
+    HeaderValue::from_str(file_to_serve.meta.mime.as_ref()).unwrap(),
   );
+
+  if let Some(encoding) = file_to_serve.meta.encoding {
+    response
+      .headers_mut()
+      .append("Content-Encoding", HeaderValue::from_str(encoding).unwrap());
+  }
+
   Ok(response)
+}
+
+struct ServedFileMeta {
+  mime: Mime,
+  file_name: String,
+  encoding: Option<&'static str>,
+}
+
+struct ServedFile {
+  file: File,
+  path: PathBuf,
+  meta: ServedFileMeta,
+}
+
+async fn decide_file_to_serve(name: Option<&str>, encodings: &[String]) -> Option<ServedFile> {
+  let mut file_candidates: VecDeque<ServedFileMeta> = VecDeque::new();
+  // fallback to index file on unmatched paths
+  // required for BrowserRouter in mpv-web-frontend
+  let index_file_type = mime_guess::from_path(INDEX_FILE_NAME);
+  let index_mime_type = index_file_type
+    .first()
+    .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
+  file_candidates.push_back(ServedFileMeta {
+    file_name: INDEX_FILE_NAME.to_owned(),
+    mime: index_mime_type.clone(),
+    encoding: None,
+  });
+  if should_file_be_encoded(&index_mime_type) {
+    if let Some((ext, encoding)) = decide_encoding_extension(encodings) {
+      file_candidates.push_front(ServedFileMeta {
+        file_name: format!("{INDEX_FILE_NAME}{ext}"),
+        mime: index_mime_type,
+        encoding: Some(encoding),
+      });
+    }
+  }
+
+  if let Some(name) = name {
+    let src_file_type = mime_guess::from_path(name);
+    let mime_type = src_file_type
+      .first()
+      .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
+    file_candidates.push_front(ServedFileMeta {
+      mime: mime_type.clone(),
+      file_name: name.to_owned(),
+      encoding: None,
+    });
+    if should_file_be_encoded(&mime_type) {
+      if let Some((ext, encoding)) = decide_encoding_extension(encodings) {
+        file_candidates.push_front(ServedFileMeta {
+          mime: mime_type,
+          file_name: format!("{name}{ext}"),
+          encoding: Some(encoding),
+        });
+      }
+    }
+  };
+
+  let mut src_file_opt: Option<ServedFile> = None;
+  for file_candidate in file_candidates {
+    let src_file_name = &file_candidate.file_name;
+    match get_frontend_file(src_file_name).await {
+      Ok((file, path)) => {
+        src_file_opt = Some(ServedFile {
+          file,
+          path,
+          meta: file_candidate,
+        });
+        break;
+      }
+      Err(err) => {
+        debug!("could not serve a file \"{src_file_name}\", reason: {err}");
+      }
+    };
+  }
+
+  src_file_opt
+}
+
+const ENCODABLE_MIMES: [Mime; 6] = [
+  mime_guess::mime::APPLICATION_JAVASCRIPT,
+  mime_guess::mime::APPLICATION_JAVASCRIPT_UTF_8,
+  mime_guess::mime::APPLICATION_OCTET_STREAM,
+  mime_guess::mime::TEXT_JAVASCRIPT,
+  mime_guess::mime::TEXT_HTML,
+  mime_guess::mime::TEXT_HTML_UTF_8,
+];
+fn should_file_be_encoded(mime_type: &Mime) -> bool {
+  ENCODABLE_MIMES
+    .iter()
+    .any(|encodable| mime_type == encodable)
+}
+
+const GZIP_EXT: &str = ".gz";
+const GZIP_ENCODING: &str = "gzip";
+const ANY_ENCODING: &str = "*";
+fn decide_encoding_extension(encodings: &[String]) -> Option<(&'static str, &'static str)> {
+  let should_serve_gzip = encodings
+    .iter()
+    .any(|en| en == GZIP_ENCODING || en == ANY_ENCODING);
+  if should_serve_gzip {
+    Some((GZIP_EXT, GZIP_ENCODING))
+  } else {
+    None
+  }
 }

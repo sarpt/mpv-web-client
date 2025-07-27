@@ -112,7 +112,7 @@ where
   let route = get_route(req).await;
   match route {
     Ok(r) => match r {
-      router::Routes::Frontend(name) => serve_frontend(name.as_deref()).await,
+      router::Routes::Frontend(name, encodings) => serve_frontend(name.as_deref(), encodings).await,
       router::Routes::Api(api_route) => match api_route {
         router::ApiRoutes::FrontendLatest => {
           check_latest_frontend_release(dependencies.packages_repository.lock().await.deref_mut())

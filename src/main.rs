@@ -1,5 +1,5 @@
 use clap::Parser;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use std::{error::Error, path::PathBuf, sync::Arc, time::SystemTime};
 use tokio::sync::Mutex;
 
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
   let args = Args::parse();
 
   init_logging()?;
-  debug!("version {VERSION}");
+  info!("version {VERSION}");
 
   ensure_project_dirs()?;
   let mut packages_repository = PackagesRepository::new();

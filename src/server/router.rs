@@ -17,7 +17,7 @@ enum ApiPathRoutes {
 }
 
 pub enum Routes {
-  Frontend(Option<String>),
+  Frontend(Option<String>, Vec<String>),
   Api(ApiRoutes),
 }
 
@@ -58,6 +58,7 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
   match routes.handler() {
     PathRoutes::Frontend => Ok(Routes::Frontend(
       routes.params().find("path").map(|val| val.to_owned()),
+      parse_accepted_encodings(req),
     )),
     PathRoutes::Api(api_path) => match api_path {
       ApiPathRoutes::Shutdown => Ok(Routes::Api(ApiRoutes::Shutdown)),
@@ -89,4 +90,26 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
 #[derive(Deserialize)]
 struct FrontendUpdateRequest {
   version: Semver,
+}
+
+const ENCODINGS_SEPARATOR: &str = ",";
+const ACCEPT_ANY_ENCODING: &str = "*";
+fn parse_accepted_encodings(req: Request<hyper::body::Incoming>) -> Vec<String> {
+  let mut encodings = req
+    .headers()
+    .get("Accept-Encoding")
+    .map_or(Vec::new(), |head| {
+      head.to_str().map_or(Vec::new(), split_encodings)
+    });
+  if encodings.is_empty() {
+    encodings.push(ACCEPT_ANY_ENCODING.to_owned());
+  }
+
+  encodings
+}
+
+fn split_encodings(s: &str) -> Vec<String> {
+  s.split(ENCODINGS_SEPARATOR)
+    .map(|s| s.trim().to_owned())
+    .collect::<Vec<String>>()
 }
