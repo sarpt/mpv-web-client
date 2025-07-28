@@ -1,6 +1,7 @@
 use std::{fs::create_dir_all, path::Path};
 
 use log::{info, warn};
+use tokio::fs::remove_dir_all;
 
 use crate::{
   frontend::{
@@ -97,13 +98,19 @@ impl PackagesRepository {
       }
     };
 
-    tokio::task::spawn_blocking(move_frontend_pkg_to_home)
+    tokio::task::spawn_blocking(copy_frontend_pkg_to_home)
       .await
       .map_err(|e| {
         FrontendPkgErr::PkgInstallFailed(format!(
           "issue with joining on blocking task for frontend move: {e}"
         ))
       })??;
+    
+    let frontend_temp_dir = get_frontend_temp_dir();
+    if let Err(e) = remove_dir_all(&frontend_temp_dir).await {
+      warn!("could not remove the temporary frontend directory at path {}: reason: {e}", frontend_temp_dir.to_string_lossy());
+    };
+
     move_manifest_to_project_home().await?;
 
     self.installed = None;
@@ -131,7 +138,7 @@ impl PackagesRepository {
   }
 }
 
-fn move_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
+fn copy_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   let frontend_temp_dir = get_frontend_temp_dir();
   let project_dir = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
   for entry_result in walkdir::WalkDir::new(frontend_temp_dir) {
