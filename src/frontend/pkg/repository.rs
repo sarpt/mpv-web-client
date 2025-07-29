@@ -4,17 +4,14 @@ use std::{
 };
 
 use log::{info, warn};
-use tokio::fs::remove_dir_all;
+use tokio::fs::{remove_dir_all, rename};
 
 use crate::{
   frontend::{
     FrontendPkgErr,
     pkg::{
       extraction::extract_frontend_pkg,
-      manifest::{
-        Manifest, move_manifest_to_project_home, parse_project_package_manifest,
-        parse_temp_package_manifest,
-      },
+      manifest::{Manifest, PKG_MANIFEST_NAME, parse_package_manifest},
     },
   },
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
@@ -56,7 +53,9 @@ impl PackagesRepository {
   }
 
   async fn check_installed(&mut self) -> Result<(), FrontendPkgErr> {
-    match parse_project_package_manifest().await {
+    let mut path = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+    path.push(PKG_MANIFEST_NAME);
+    match parse_package_manifest(path).await {
       Ok(m) => {
         let package = Package { manifest: m };
         self.installed = Some(package);
@@ -67,7 +66,9 @@ impl PackagesRepository {
   }
 
   async fn check_temp(&mut self) -> Result<(), FrontendPkgErr> {
-    match parse_temp_package_manifest().await {
+    let mut path = get_frontend_temp_dir();
+    path.push(PKG_MANIFEST_NAME);
+    match parse_package_manifest(path).await {
       Ok(m) => {
         let package = Package { manifest: m };
         self.installed = Some(package);
@@ -197,4 +198,21 @@ fn copy_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   }
 
   Ok(())
+}
+
+async fn move_manifest_to_project_home() -> Result<(), FrontendPkgErr> {
+  let frontend_dir = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+  let manifest_file_path = {
+    let mut path = frontend_dir.clone();
+    path.push(PKG_MANIFEST_NAME);
+    path
+  };
+  let new_manifest_file_path = {
+    let mut path = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+    path.push(PKG_MANIFEST_NAME);
+    path
+  };
+  rename(manifest_file_path, new_manifest_file_path)
+    .await
+    .map_err(FrontendPkgErr::HomeDirInaccessible)
 }
