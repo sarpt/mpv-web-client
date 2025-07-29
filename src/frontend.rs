@@ -52,26 +52,6 @@ where
   Ok(())
 }
 
-pub async fn get_frontend_file<T>(name: T) -> Result<(tokio::fs::File, PathBuf), std::io::Error>
-where
-  T: AsRef<Path>,
-{
-  let mut src_path = get_frontend_dir()?;
-  src_path.push(name);
-
-  let src_file_open_result = tokio::fs::OpenOptions::default()
-    .create(false)
-    .read(true)
-    .write(false)
-    .open(&src_path)
-    .await;
-
-  match src_file_open_result {
-    Ok(src_file) => Ok((src_file, src_path)),
-    Err(err) => Err(err),
-  }
-}
-
 pub const INDEX_FILE_NAME: &str = "index.html";
 pub fn get_frontend_index_path() -> Result<PathBuf, std::io::Error> {
   let mut path = get_frontend_dir()?;

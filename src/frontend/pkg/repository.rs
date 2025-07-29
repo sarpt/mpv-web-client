@@ -1,4 +1,7 @@
-use std::{fs::create_dir_all, path::Path};
+use std::{
+  fs::create_dir_all,
+  path::{Path, PathBuf},
+};
 
 use log::{info, warn};
 use tokio::fs::remove_dir_all;
@@ -14,7 +17,7 @@ use crate::{
       },
     },
   },
-  project_paths::{get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
+  project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
 };
 
 pub struct Package {
@@ -105,10 +108,13 @@ impl PackagesRepository {
           "issue with joining on blocking task for frontend move: {e}"
         ))
       })??;
-    
+
     let frontend_temp_dir = get_frontend_temp_dir();
     if let Err(e) = remove_dir_all(&frontend_temp_dir).await {
-      warn!("could not remove the temporary frontend directory at path {}: reason: {e}", frontend_temp_dir.to_string_lossy());
+      warn!(
+        "could not remove the temporary frontend directory at path {}: reason: {e}",
+        frontend_temp_dir.to_string_lossy()
+      );
     };
 
     move_manifest_to_project_home().await?;
@@ -116,6 +122,29 @@ impl PackagesRepository {
     self.installed = None;
 
     Ok(())
+  }
+
+  pub async fn get_installed_file<T>(
+    &self,
+    name: T,
+  ) -> Result<(tokio::fs::File, PathBuf), std::io::Error>
+  where
+    T: AsRef<Path>,
+  {
+    let mut src_path = get_frontend_dir()?;
+    src_path.push(name);
+
+    let src_file_open_result = tokio::fs::OpenOptions::default()
+      .create(false)
+      .read(true)
+      .write(false)
+      .open(&src_path)
+      .await;
+
+    match src_file_open_result {
+      Ok(src_file) => Ok((src_file, src_path)),
+      Err(err) => Err(err),
+    }
   }
 
   async fn check_temp_pkg_manifest_against_installed_one(&mut self) -> Result<(), FrontendPkgErr> {
