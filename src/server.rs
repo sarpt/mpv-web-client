@@ -122,8 +122,7 @@ where
       }
       router::Routes::Api(api_route) => match api_route {
         router::ApiRoutes::FrontendLatest => {
-          check_latest_frontend_release(dependencies.packages_repository.lock().await.deref_mut())
-            .await
+          check_latest_frontend_release(dependencies.packages_repository.lock().await.deref()).await
         }
         router::ApiRoutes::FrontendUpdate(release) => {
           update_frontend_package(

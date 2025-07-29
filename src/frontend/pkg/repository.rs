@@ -37,31 +37,43 @@ impl PackagesRepository {
     }
   }
 
-  pub async fn get_installed(&mut self) -> Result<&Package, FrontendPkgErr> {
+  pub fn get_installed(&self) -> Result<&Package, FrontendPkgErr> {
     match self.installed {
       Some(ref pkg) => Ok(pkg),
-      None => match parse_project_package_manifest().await {
-        Ok(m) => {
-          let package = Package { manifest: m };
-          self.installed = Some(package);
-          Ok(self.installed.as_ref().unwrap())
-        }
-        Err(err) => Err(err),
-      },
+      None => Err(FrontendPkgErr::ManifestInvalid(
+        "could not retrieve installed manifest".to_owned(),
+      )), // TODO: this error type does not make sense
     }
   }
 
-  pub async fn get_temp(&mut self) -> Result<&Package, FrontendPkgErr> {
+  pub fn get_temp(&self) -> Result<&Package, FrontendPkgErr> {
     match self.temp {
       Some(ref pkg) => Ok(pkg),
-      None => match parse_temp_package_manifest().await {
-        Ok(m) => {
-          let package = Package { manifest: m };
-          self.installed = Some(package);
-          Ok(self.installed.as_ref().unwrap())
-        }
-        Err(err) => Err(err),
-      },
+      None => Err(FrontendPkgErr::ManifestInvalid(
+        "could not retrieve temp manifest".to_owned(),
+      )), // TODO: this error type does not make sense
+    }
+  }
+
+  async fn check_installed(&mut self) -> Result<(), FrontendPkgErr> {
+    match parse_project_package_manifest().await {
+      Ok(m) => {
+        let package = Package { manifest: m };
+        self.installed = Some(package);
+        Ok(())
+      }
+      Err(err) => Err(err),
+    }
+  }
+
+  async fn check_temp(&mut self) -> Result<(), FrontendPkgErr> {
+    match parse_temp_package_manifest().await {
+      Ok(m) => {
+        let package = Package { manifest: m };
+        self.installed = Some(package);
+        Ok(())
+      }
+      Err(err) => Err(err),
     }
   }
 
@@ -80,8 +92,7 @@ impl PackagesRepository {
           "issue with joining on blocking task for frontend extraction: {e}"
         ))
       })??;
-
-    self.temp = None;
+    self.check_temp().await?;
 
     match self.check_temp_pkg_manifest_against_installed_one().await {
       Ok(()) => {}
@@ -118,8 +129,7 @@ impl PackagesRepository {
     };
 
     move_manifest_to_project_home().await?;
-
-    self.installed = None;
+    self.check_installed().await?;
 
     Ok(())
   }
@@ -148,8 +158,8 @@ impl PackagesRepository {
   }
 
   async fn check_temp_pkg_manifest_against_installed_one(&mut self) -> Result<(), FrontendPkgErr> {
-    let temp_version = self.get_temp().await?.manifest.version_info.version;
-    let local_version = match self.get_installed().await {
+    let temp_version = self.get_temp()?.manifest.version_info.version;
+    let local_version = match self.get_installed() {
       Ok(pkg) => pkg.manifest.version_info.version,
       Err(err) => {
         warn!("could not parse existing frontend package manifest: {err}");

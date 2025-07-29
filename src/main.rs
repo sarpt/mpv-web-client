@@ -131,7 +131,7 @@ async fn init_frontend(
 
 async fn remote_frontend_release_available(
   allow_updates: bool,
-  pkgs_repository: &mut PackagesRepository,
+  pkgs_repository: &PackagesRepository,
 ) -> Option<Release> {
   match check_for_newer_remote_release(pkgs_repository).await {
     Ok(result) => match result {

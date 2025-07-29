@@ -65,7 +65,7 @@ pub enum RemoteReleaseCheckResult {
   RemoteNecessary(Release),
 }
 pub async fn check_for_newer_remote_release(
-  pkgs_repo: &mut PackagesRepository,
+  pkgs_repo: &PackagesRepository,
 ) -> Result<RemoteReleaseCheckResult, FrontendPkgErr> {
   let release = get_remote_release(Version::Latest)
     .await
@@ -76,7 +76,7 @@ pub async fn check_for_newer_remote_release(
     release.version
   );
   let remote_version = release.version;
-  let local_version = match pkgs_repo.get_installed().await {
+  let local_version = match pkgs_repo.get_installed() {
     Ok(installed) => installed.manifest.version_info.version,
     Err(_) => {
       warn!("could not infer local frontend package version");
