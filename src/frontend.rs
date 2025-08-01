@@ -1,4 +1,4 @@
-use log::{info, warn};
+use log::{error, info, warn};
 use std::{
   fmt::Display,
   fs::exists,
@@ -9,62 +9,117 @@ use crate::{
   common::semver::Semver,
   frontend::{
     pkg::{manifest::PKG_MANIFEST_NAME, repository::PackagesRepository},
-    releases::{Release, ReleaseFetchErr, Version, get_remote_release},
+    releases::{
+      Release, ReleaseFetchErr, Version, fetch_remote_frontend_package_release, get_remote_release,
+    },
   },
-  project_paths::{get_frontend_dir, get_project_home_dir},
+  project_paths::get_project_home_dir,
 };
 
 pub mod pkg;
 pub mod releases;
 
-pub fn check_frontend_pkg<T>(pkg_path: Option<T>) -> Result<(), FrontendPkgErr>
+pub const INDEX_FILE_NAME: &str = "index.html";
+
+pub async fn init_frontend(
+  pkg: Option<PathBuf>,
+  update: bool,
+  force_outdated: bool,
+  pkgs_repository: &mut PackagesRepository,
+) -> Result<(), String> {
+  pkgs_repository.init().await;
+
+  let mut pkg_path = pkg;
+  if pkg_path.is_none() {
+    if let Some(new_release) = remote_frontend_release_available(update, pkgs_repository).await {
+      info!(
+        "fetching new frontend package version \"{}\"",
+        new_release.name
+      );
+      pkg_path = fetch_new_frontend_release(&new_release).await;
+    }
+  }
+
+  if let Some(ref path) = pkg_path {
+    pkgs_repository
+      .install_package(path.to_owned(), force_outdated)
+      .await
+      .map_err(|err| format!("frontend package install failed: {err}"))?;
+  }
+
+  match check_frontend_pkg(pkg_path).await {
+    Ok(_) => Ok(()),
+    Err(err) => Err(format!("frontend init failed: {err}")),
+  }
+}
+
+async fn fetch_new_frontend_release(new_release: &Release) -> Option<PathBuf> {
+  match fetch_remote_frontend_package_release(new_release).await {
+    Ok(path_pkg) => Some(path_pkg),
+    Err(err) => {
+      error!("fetch of remote frontend package failed: {err}");
+      None
+    }
+  }
+}
+
+async fn remote_frontend_release_available(
+  allow_updates: bool,
+  pkgs_repository: &PackagesRepository,
+) -> Option<Release> {
+  match check_for_newer_remote_release(pkgs_repository).await {
+    Ok(result) => match result {
+      RemoteReleaseCheckResult::UpToDate(local) => {
+        info!("local frontend version \"{local}\" is up to date");
+        None
+      }
+      RemoteReleaseCheckResult::NewerRemoteAvailable(new_release) => {
+        if allow_updates {
+          Some(new_release)
+        } else {
+          info!(
+            "newer frontend release \"{}\" is available - run the program with \"--update\" argument to install it",
+            new_release.name
+          );
+          None
+        }
+      }
+      RemoteReleaseCheckResult::RemoteNecessary(release) => Some(release),
+    },
+    Err(err) => {
+      error!("check for the latest remote package failed: {err}");
+      None
+    }
+  }
+}
+
+pub async fn check_frontend_pkg<T>(pkg_path: Option<T>) -> Result<(), FrontendPkgErr>
 where
   T: AsRef<Path>,
 {
-  {
-    let path = get_frontend_index_path().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-    let index_exists = exists(path).map_err(|err| FrontendPkgErr::IndexNotFound(Some(err)))?;
-    if !index_exists {
-      if pkg_path.is_none() {
-        return Err(FrontendPkgErr::PkgNotProvided);
-      } else {
-        return Err(FrontendPkgErr::IndexNotFound(None));
-      }
+  let mut path = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+  path.push(PKG_MANIFEST_NAME);
+  let manifest_exists = exists(path).map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
+  if !manifest_exists {
+    if pkg_path.is_none() {
+      return Err(FrontendPkgErr::PkgNotProvided);
+    } else {
+      return Err(FrontendPkgErr::PkgInvalid(
+        "manifest file does not exist in project home directory".to_owned(),
+      ));
     }
-  };
+  }
 
-  {
-    let mut path = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-    path.push(PKG_MANIFEST_NAME);
-    let manifest_exists =
-      exists(path).map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
-    if !manifest_exists {
-      if pkg_path.is_none() {
-        return Err(FrontendPkgErr::PkgNotProvided);
-      } else {
-        return Err(FrontendPkgErr::PkgInvalid(
-          "manifest file does not exist in project home directory".to_owned(),
-        ));
-      }
-    }
-  };
-
+  // TODO: add entrypoint to frontend package and add check for this entrypoint here with fallback to default index html
   Ok(())
 }
 
-pub const INDEX_FILE_NAME: &str = "index.html";
-pub fn get_frontend_index_path() -> Result<PathBuf, std::io::Error> {
-  let mut path = get_frontend_dir()?;
-  path.push(INDEX_FILE_NAME);
-  Ok(path)
-}
-
-pub enum RemoteReleaseCheckResult {
+enum RemoteReleaseCheckResult {
   UpToDate(Semver),
   NewerRemoteAvailable(Release),
   RemoteNecessary(Release),
 }
-pub async fn check_for_newer_remote_release(
+async fn check_for_newer_remote_release(
   pkgs_repo: &PackagesRepository,
 ) -> Result<RemoteReleaseCheckResult, FrontendPkgErr> {
   let release = get_remote_release(Version::Latest)

@@ -3,7 +3,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use log::{info, warn};
+use log::{debug, info, warn};
 use tokio::fs::{remove_dir_all, rename};
 
 use crate::{
@@ -15,7 +15,7 @@ use crate::{
       manifest::{Manifest, PKG_MANIFEST_NAME, parse_package_manifest},
     },
   },
-  project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
+  project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir},
 };
 
 #[derive(Clone)]
@@ -34,6 +34,16 @@ impl PackagesRepository {
       installed: None,
       temp: None,
     }
+  }
+
+  pub async fn init(&mut self) {
+    if let Err(err) = self.check_temp().await {
+      debug!("initial temp pkg check unsuccessful: {err}");
+    };
+
+    if let Err(err) = self.check_installed().await {
+      debug!("initial installed pkg check unsuccessful: {err}");
+    };
   }
 
   pub fn get_installed(&self) -> Result<&Package, FrontendPkgErr> {
@@ -73,7 +83,7 @@ impl PackagesRepository {
     match parse_package_manifest(path).await {
       Ok(m) => {
         let package = Package { manifest: m };
-        self.installed = Some(package.clone());
+        self.temp = Some(package.clone());
         Ok(package)
       }
       Err(err) => Err(err),
@@ -189,16 +199,17 @@ impl PackagesRepository {
 
 fn copy_frontend_pkg_to_home(version: &Semver) -> Result<(), FrontendPkgErr> {
   let frontend_temp_dir = get_frontend_temp_dir();
-  let mut project_dir = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-  project_dir.push(version.to_string());
-  for entry_result in walkdir::WalkDir::new(frontend_temp_dir) {
+  let mut install_frontend_dir = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+  install_frontend_dir.push(version.to_string());
+
+  for entry_result in walkdir::WalkDir::new(&frontend_temp_dir) {
     let entry = match entry_result {
       Ok(e) => e,
       Err(err) => return Err(FrontendPkgErr::PkgUnpackErr(err.into())),
     };
 
-    let mut tgt_path = project_dir.clone();
-    let stripped_path = entry.path().strip_prefix(get_temp_dir()).unwrap();
+    let mut tgt_path = install_frontend_dir.clone();
+    let stripped_path = entry.path().strip_prefix(&frontend_temp_dir).unwrap();
     tgt_path.push(stripped_path);
     if entry.file_type().is_dir() {
       create_dir_all(tgt_path).map_err(FrontendPkgErr::PkgUnpackErr)?;

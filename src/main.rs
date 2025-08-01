@@ -4,11 +4,7 @@ use std::{error::Error, path::PathBuf, sync::Arc, time::SystemTime};
 use tokio::sync::Mutex;
 
 use crate::{
-  frontend::{
-    RemoteReleaseCheckResult, check_for_newer_remote_release, check_frontend_pkg,
-    pkg::repository::PackagesRepository,
-    releases::{Release, fetch_remote_frontend_package_release},
-  },
+  frontend::{init_frontend, pkg::repository::PackagesRepository},
   project_paths::ensure_project_dirs,
   server::serve,
 };
@@ -76,9 +72,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
   ensure_project_dirs()?;
   let mut packages_repository = PackagesRepository::new();
-  init_frontend(&args, &mut packages_repository)
-    .await
-    .map_err(|err_msg| *Box::new(err_msg))?;
+  init_frontend(
+    args.pkg,
+    args.update,
+    args.force_outdated,
+    &mut packages_repository,
+  )
+  .await
+  .map_err(|err_msg| *Box::new(err_msg))?;
   let idle_shutdown_interval = if args.enable_idle_shutdown_timeout {
     warn!(
       "server will shut down after being idle for {} seconds!",
@@ -98,75 +99,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
   }
 
   Ok(())
-}
-
-async fn init_frontend(
-  args: &Args,
-  pkgs_repository: &mut PackagesRepository,
-) -> Result<(), String> {
-  let mut pkg_path = args.pkg.to_owned();
-  if pkg_path.is_none() {
-    if let Some(new_release) = remote_frontend_release_available(args.update, pkgs_repository).await
-    {
-      info!(
-        "fetching new frontend package version \"{}\"",
-        new_release.name
-      );
-      pkg_path = fetch_new_frontend_release(&new_release).await;
-    }
-  }
-
-  if let Some(ref path) = pkg_path {
-    pkgs_repository
-      .install_package(path.to_owned(), args.force_outdated)
-      .await
-      .map_err(|err| format!("frontend package install failed: {err}"))?;
-  }
-
-  match check_frontend_pkg(pkg_path) {
-    Ok(_) => Ok(()),
-    Err(err) => Err(format!("frontend init failed: {err}")),
-  }
-}
-
-async fn remote_frontend_release_available(
-  allow_updates: bool,
-  pkgs_repository: &PackagesRepository,
-) -> Option<Release> {
-  match check_for_newer_remote_release(pkgs_repository).await {
-    Ok(result) => match result {
-      RemoteReleaseCheckResult::UpToDate(local) => {
-        info!("local frontend version \"{local}\" is up to date");
-        None
-      }
-      RemoteReleaseCheckResult::NewerRemoteAvailable(new_release) => {
-        if allow_updates {
-          Some(new_release)
-        } else {
-          info!(
-            "newer frontend release \"{}\" is available - run the program with \"--update\" argument to install it",
-            new_release.name
-          );
-          None
-        }
-      }
-      RemoteReleaseCheckResult::RemoteNecessary(release) => Some(release),
-    },
-    Err(err) => {
-      error!("check for the latest remote package failed: {err}");
-      None
-    }
-  }
-}
-
-async fn fetch_new_frontend_release(new_release: &Release) -> Option<PathBuf> {
-  match fetch_remote_frontend_package_release(new_release).await {
-    Ok(path_pkg) => Some(path_pkg),
-    Err(err) => {
-      error!("fetch of remote frontend package failed: {err}");
-      None
-    }
-  }
 }
 
 fn init_logging() -> Result<(), fern::InitError> {
