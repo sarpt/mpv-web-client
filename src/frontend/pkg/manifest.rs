@@ -6,13 +6,13 @@ use crate::{common::semver::Semver, frontend::FrontendPkgErr};
 
 pub const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
 
-#[derive(Deserialize, PartialEq)]
+#[derive(Deserialize, PartialEq, Clone)]
 pub struct VersionInfo {
   pub version: Semver,
   pub commit: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Manifest {
   pub version_info: VersionInfo,
 }

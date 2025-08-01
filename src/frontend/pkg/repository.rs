@@ -7,6 +7,7 @@ use log::{info, warn};
 use tokio::fs::{remove_dir_all, rename};
 
 use crate::{
+  common::semver::Semver,
   frontend::{
     FrontendPkgErr,
     pkg::{
@@ -17,6 +18,7 @@ use crate::{
   project_paths::{get_frontend_dir, get_frontend_temp_dir, get_project_home_dir, get_temp_dir},
 };
 
+#[derive(Clone)]
 pub struct Package {
   pub manifest: Manifest,
 }
@@ -52,27 +54,27 @@ impl PackagesRepository {
     }
   }
 
-  async fn check_installed(&mut self) -> Result<(), FrontendPkgErr> {
+  async fn check_installed(&mut self) -> Result<Package, FrontendPkgErr> {
     let mut path = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
     path.push(PKG_MANIFEST_NAME);
     match parse_package_manifest(path).await {
       Ok(m) => {
         let package = Package { manifest: m };
-        self.installed = Some(package);
-        Ok(())
+        self.installed = Some(package.clone());
+        Ok(package)
       }
       Err(err) => Err(err),
     }
   }
 
-  async fn check_temp(&mut self) -> Result<(), FrontendPkgErr> {
+  async fn check_temp(&mut self) -> Result<Package, FrontendPkgErr> {
     let mut path = get_frontend_temp_dir();
     path.push(PKG_MANIFEST_NAME);
     match parse_package_manifest(path).await {
       Ok(m) => {
         let package = Package { manifest: m };
-        self.installed = Some(package);
-        Ok(())
+        self.installed = Some(package.clone());
+        Ok(package)
       }
       Err(err) => Err(err),
     }
@@ -93,7 +95,7 @@ impl PackagesRepository {
           "issue with joining on blocking task for frontend extraction: {e}"
         ))
       })??;
-    self.check_temp().await?;
+    let temp_version = self.check_temp().await?.manifest.version_info.version;
 
     match self.check_temp_pkg_manifest_against_installed_one().await {
       Ok(()) => {}
@@ -113,7 +115,7 @@ impl PackagesRepository {
       }
     };
 
-    tokio::task::spawn_blocking(copy_frontend_pkg_to_home)
+    tokio::task::spawn_blocking(move || copy_frontend_pkg_to_home(&temp_version))
       .await
       .map_err(|e| {
         FrontendPkgErr::PkgInstallFailed(format!(
@@ -129,7 +131,7 @@ impl PackagesRepository {
       );
     };
 
-    move_manifest_to_project_home().await?;
+    move_manifest_to_project_home(&temp_version).await?;
     self.check_installed().await?;
 
     Ok(())
@@ -138,11 +140,18 @@ impl PackagesRepository {
   pub async fn get_installed_file<T>(
     &self,
     name: T,
-  ) -> Result<(tokio::fs::File, PathBuf), std::io::Error>
+  ) -> Result<(tokio::fs::File, PathBuf), FrontendPkgErr>
   where
     T: AsRef<Path>,
   {
-    let mut src_path = get_frontend_dir()?;
+    let mut src_path = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+    let version = self
+      .get_installed()?
+      .manifest
+      .version_info
+      .version
+      .to_string();
+    src_path.push(version);
     src_path.push(name);
 
     let src_file_open_result = tokio::fs::OpenOptions::default()
@@ -154,7 +163,7 @@ impl PackagesRepository {
 
     match src_file_open_result {
       Ok(src_file) => Ok((src_file, src_path)),
-      Err(err) => Err(err),
+      Err(err) => Err(FrontendPkgErr::HomeDirInaccessible(err)),
     }
   }
 
@@ -178,9 +187,10 @@ impl PackagesRepository {
   }
 }
 
-fn copy_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
+fn copy_frontend_pkg_to_home(version: &Semver) -> Result<(), FrontendPkgErr> {
   let frontend_temp_dir = get_frontend_temp_dir();
-  let project_dir = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+  let mut project_dir = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+  project_dir.push(version.to_string());
   for entry_result in walkdir::WalkDir::new(frontend_temp_dir) {
     let entry = match entry_result {
       Ok(e) => e,
@@ -200,8 +210,9 @@ fn copy_frontend_pkg_to_home() -> Result<(), FrontendPkgErr> {
   Ok(())
 }
 
-async fn move_manifest_to_project_home() -> Result<(), FrontendPkgErr> {
-  let frontend_dir = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
+async fn move_manifest_to_project_home(version: &Semver) -> Result<(), FrontendPkgErr> {
+  let mut frontend_dir = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?; // this should also use version
+  frontend_dir.push(version.to_string());
   let manifest_file_path = {
     let mut path = frontend_dir.clone();
     path.push(PKG_MANIFEST_NAME);
