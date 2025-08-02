@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use futures::StreamExt;
 use http_body_util::StreamBody;
@@ -13,7 +13,7 @@ use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio_util::io::ReaderStream;
 
-use crate::frontend::INDEX_FILE_NAME;
+use crate::frontend::DEFAULT_ENTRYPOINT_FILE_NAME;
 use crate::frontend::pkg::repository::PackagesRepository;
 use crate::server::common::ServiceError;
 
@@ -74,42 +74,46 @@ async fn decide_file_to_serve(
   pkgs_repo: &PackagesRepository,
 ) -> Option<ServedFile> {
   let mut file_candidates: VecDeque<ServedFileMeta> = VecDeque::new();
-  // fallback to index file on unmatched paths
+  // fallback to entrypoint on unmatched paths, with additional fallback to default index name
   // required for BrowserRouter in mpv-web-frontend
-  let index_file_type = mime_guess::from_path(INDEX_FILE_NAME);
-  let index_mime_type = index_file_type
-    .first()
-    .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
+  let entrypoint_fallback_name = match pkgs_repo.get_installed() {
+    Ok(pkg) => pkg
+      .manifest
+      .version_info
+      .entrypoint
+      .as_deref()
+      .unwrap_or(DEFAULT_ENTRYPOINT_FILE_NAME),
+    Err(_) => DEFAULT_ENTRYPOINT_FILE_NAME,
+  };
+  let (entrypoint_mime_type, entrypoint_encoding) =
+    file_mime_and_encoding(entrypoint_fallback_name);
   file_candidates.push_back(ServedFileMeta {
-    file_name: INDEX_FILE_NAME.to_owned(),
-    mime: index_mime_type.clone(),
-    encoding: None,
+    file_name: entrypoint_fallback_name.to_owned(),
+    mime: entrypoint_mime_type.clone(),
+    encoding: entrypoint_encoding,
   });
-  if should_file_be_encoded(&index_mime_type) {
+  if entrypoint_encoding.is_none() && should_file_be_encoded(&entrypoint_mime_type) {
     if let Some((ext, encoding)) = decide_encoding_extension(encodings) {
       file_candidates.push_front(ServedFileMeta {
-        file_name: format!("{INDEX_FILE_NAME}{ext}"),
-        mime: index_mime_type,
+        file_name: format!("{entrypoint_fallback_name}.{ext}"),
+        mime: entrypoint_mime_type,
         encoding: Some(encoding),
       });
     }
   }
 
   if let Some(name) = name {
-    let src_file_type = mime_guess::from_path(name);
-    let mime_type = src_file_type
-      .first()
-      .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
+    let (file_mime_type, file_encoding) = file_mime_and_encoding(name);
     file_candidates.push_front(ServedFileMeta {
-      mime: mime_type.clone(),
+      mime: file_mime_type.clone(),
       file_name: name.to_owned(),
-      encoding: None,
+      encoding: file_encoding,
     });
-    if should_file_be_encoded(&mime_type) {
+    if file_encoding.is_none() && should_file_be_encoded(&file_mime_type) {
       if let Some((ext, encoding)) = decide_encoding_extension(encodings) {
         file_candidates.push_front(ServedFileMeta {
-          mime: mime_type,
-          file_name: format!("{name}{ext}"),
+          mime: file_mime_type,
+          file_name: format!("{name}.{ext}"),
           encoding: Some(encoding),
         });
       }
@@ -151,7 +155,7 @@ fn should_file_be_encoded(mime_type: &Mime) -> bool {
     .any(|encodable| mime_type == encodable)
 }
 
-const GZIP_EXT: &str = ".gz";
+const GZIP_EXT: &str = "gz";
 const GZIP_ENCODING: &str = "gzip";
 const ANY_ENCODING: &str = "*";
 fn decide_encoding_extension(encodings: &[String]) -> Option<(&'static str, &'static str)> {
@@ -160,6 +164,40 @@ fn decide_encoding_extension(encodings: &[String]) -> Option<(&'static str, &'st
     .any(|en| en == GZIP_ENCODING || en == ANY_ENCODING);
   if should_serve_gzip {
     Some((GZIP_EXT, GZIP_ENCODING))
+  } else {
+    None
+  }
+}
+
+fn file_mime_and_encoding<T>(name: T) -> (Mime, Option<&'static str>)
+where
+  T: AsRef<Path>,
+{
+  let encoding = encoding_for_name(&name);
+  let file_type = match encoding {
+    Some(_) => {
+      let name_without_ext = name.as_ref().file_stem();
+      match name_without_ext {
+        Some(name) => mime_guess::from_path(name),
+        None => mime_guess::from_path(name),
+      }
+    }
+    None => mime_guess::from_path(name),
+  };
+  let mime_type = file_type
+    .first()
+    .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
+
+  (mime_type, encoding)
+}
+
+fn encoding_for_name<T>(name: T) -> Option<&'static str>
+where
+  T: AsRef<Path>,
+{
+  let extension = name.as_ref().extension()?;
+  if extension == GZIP_EXT {
+    Some(GZIP_ENCODING)
   } else {
     None
   }

@@ -37,30 +37,26 @@ impl PackagesRepository {
   }
 
   pub async fn init(&mut self) {
-    if let Err(err) = self.check_temp().await {
-      debug!("initial temp pkg check unsuccessful: {err}");
-    };
-
     if let Err(err) = self.check_installed().await {
-      debug!("initial installed pkg check unsuccessful: {err}");
+      debug!("initial installed package check unsuccessful: {err}");
     };
   }
 
   pub fn get_installed(&self) -> Result<&Package, FrontendPkgErr> {
     match self.installed {
       Some(ref pkg) => Ok(pkg),
-      None => Err(FrontendPkgErr::ManifestInvalid(
-        "could not retrieve installed manifest".to_owned(),
-      )), // TODO: this error type does not make sense
+      None => Err(FrontendPkgErr::PackageUnavailable(
+        "there is no package installed".to_owned(),
+      )),
     }
   }
 
   pub fn get_temp(&self) -> Result<&Package, FrontendPkgErr> {
     match self.temp {
       Some(ref pkg) => Ok(pkg),
-      None => Err(FrontendPkgErr::ManifestInvalid(
-        "could not retrieve temp manifest".to_owned(),
-      )), // TODO: this error type does not make sense
+      None => Err(FrontendPkgErr::PackageUnavailable(
+        "there is no temporary package".to_owned(),
+      )),
     }
   }
 
@@ -140,6 +136,7 @@ impl PackagesRepository {
         frontend_temp_dir.to_string_lossy()
       );
     };
+    self.temp = None;
 
     move_manifest_to_project_home(&temp_version).await?;
     self.check_installed().await?;

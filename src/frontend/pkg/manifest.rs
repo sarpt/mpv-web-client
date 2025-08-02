@@ -10,6 +10,7 @@ pub const PKG_MANIFEST_NAME: &str = "pkg_manifest.toml";
 pub struct VersionInfo {
   pub version: Semver,
   pub commit: String,
+  pub entrypoint: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
