@@ -13,7 +13,7 @@ use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio_util::io::ReaderStream;
 
-use crate::frontend::INDEX_FILE_NAME;
+use crate::frontend::DEFAULT_ENTRYPOINT_FILE_NAME;
 use crate::frontend::pkg::repository::PackagesRepository;
 use crate::server::common::ServiceError;
 
@@ -76,19 +76,20 @@ async fn decide_file_to_serve(
   let mut file_candidates: VecDeque<ServedFileMeta> = VecDeque::new();
   // fallback to index file on unmatched paths
   // required for BrowserRouter in mpv-web-frontend
-  let index_file_type = mime_guess::from_path(INDEX_FILE_NAME);
+  // TODO: this should fallback to entrypoint from installed pkg_manifest
+  let index_file_type = mime_guess::from_path(DEFAULT_ENTRYPOINT_FILE_NAME);
   let index_mime_type = index_file_type
     .first()
     .unwrap_or(mime_guess::mime::APPLICATION_OCTET_STREAM);
   file_candidates.push_back(ServedFileMeta {
-    file_name: INDEX_FILE_NAME.to_owned(),
+    file_name: DEFAULT_ENTRYPOINT_FILE_NAME.to_owned(),
     mime: index_mime_type.clone(),
     encoding: None,
   });
   if should_file_be_encoded(&index_mime_type) {
     if let Some((ext, encoding)) = decide_encoding_extension(encodings) {
       file_candidates.push_front(ServedFileMeta {
-        file_name: format!("{INDEX_FILE_NAME}{ext}"),
+        file_name: format!("{DEFAULT_ENTRYPOINT_FILE_NAME}{ext}"),
         mime: index_mime_type,
         encoding: Some(encoding),
       });

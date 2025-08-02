@@ -1,25 +1,20 @@
 use log::{error, info, warn};
-use std::{
-  fmt::Display,
-  fs::exists,
-  path::{Path, PathBuf},
-};
+use std::{fmt::Display, path::PathBuf};
 
 use crate::{
   common::semver::Semver,
   frontend::{
-    pkg::{manifest::PKG_MANIFEST_NAME, repository::PackagesRepository},
+    pkg::repository::PackagesRepository,
     releases::{
       Release, ReleaseFetchErr, Version, fetch_remote_frontend_package_release, get_remote_release,
     },
   },
-  project_paths::get_project_home_dir,
 };
 
 pub mod pkg;
 pub mod releases;
 
-pub const INDEX_FILE_NAME: &str = "index.html";
+pub const DEFAULT_ENTRYPOINT_FILE_NAME: &str = "index.html";
 
 pub async fn init_frontend(
   pkg: Option<PathBuf>,
@@ -47,7 +42,7 @@ pub async fn init_frontend(
       .map_err(|err| format!("frontend package install failed: {err}"))?;
   }
 
-  match check_frontend_pkg(pkg_path).await {
+  match check_frontend_pkg(pkgs_repository).await {
     Ok(_) => Ok(()),
     Err(err) => Err(format!("frontend init failed: {err}")),
   }
@@ -93,25 +88,24 @@ async fn remote_frontend_release_available(
   }
 }
 
-pub async fn check_frontend_pkg<T>(pkg_path: Option<T>) -> Result<(), FrontendPkgErr>
-where
-  T: AsRef<Path>,
-{
-  let mut path = get_project_home_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
-  path.push(PKG_MANIFEST_NAME);
-  let manifest_exists = exists(path).map_err(|err| FrontendPkgErr::PkgInvalid(err.to_string()))?;
-  if !manifest_exists {
-    if pkg_path.is_none() {
-      return Err(FrontendPkgErr::PkgNotProvided);
-    } else {
-      return Err(FrontendPkgErr::PkgInvalid(
-        "manifest file does not exist in project home directory".to_owned(),
-      ));
+pub async fn check_frontend_pkg(pkgs_repo: &PackagesRepository) -> Result<(), FrontendPkgErr> {
+  let frontend_entrypoint = match pkgs_repo.get_installed() {
+    Ok(pkg) => &pkg.manifest.version_info.entrypoint,
+    Err(err) => {
+      return Err(FrontendPkgErr::PkgInvalid(format!(
+        "cannot read manifest file in project home directory: {err}"
+      )));
     }
-  }
+  };
 
-  // TODO: add entrypoint to frontend package and add check for this entrypoint here with fallback to default index html
-  Ok(())
+  let default = &DEFAULT_ENTRYPOINT_FILE_NAME.to_owned();
+  let frontend_entrypoint_path = frontend_entrypoint.as_ref().unwrap_or(default);
+  match pkgs_repo.get_installed_file(frontend_entrypoint_path).await {
+    Ok(_) => Ok(()),
+    Err(err) => Err(FrontendPkgErr::EntrypointNotFound(format!(
+      "entrypoint file \"{frontend_entrypoint_path}\" does not exist in project home directory: {err}"
+    ))),
+  }
 }
 
 enum RemoteReleaseCheckResult {
@@ -150,9 +144,8 @@ async fn check_for_newer_remote_release(
 }
 
 pub enum FrontendPkgErr {
-  IndexNotFound(Option<std::io::Error>),
+  EntrypointNotFound(String),
   PkgInstallFailed(String),
-  PkgNotProvided,
   PkgUnpackErr(std::io::Error),
   PkgInvalid(String),
   PkgOutdated(String, String),
@@ -166,17 +159,13 @@ impl Display for FrontendPkgErr {
     match self {
       FrontendPkgErr::PkgInvalid(err) => write!(f, "provided pkg file is invalid: {err}"),
       FrontendPkgErr::PkgInstallFailed(err) => write!(f, "package install failed: {err}"),
-      FrontendPkgErr::IndexNotFound(error) => write!(
+      FrontendPkgErr::EntrypointNotFound(error) => write!(
         f,
-        "frontend cannot be served due to lack of entrypoint file: {error:?}"
+        "frontend cannot be served due to lack of an entrypoint file: {error:?}"
       ),
       FrontendPkgErr::HomeDirInaccessible(error) => {
         write!(f, "the program could not read it's home directory: {error}")
       }
-      FrontendPkgErr::PkgNotProvided => write!(
-        f,
-        "frontend package has not been provided and there is no cached frontend package",
-      ),
       FrontendPkgErr::PkgUnpackErr(error) => {
         write!(f, "frontend package could not be unpacked: {error}")
       }
