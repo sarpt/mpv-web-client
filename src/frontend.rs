@@ -98,12 +98,13 @@ pub async fn check_frontend_pkg(pkgs_repo: &PackagesRepository) -> Result<(), Fr
     }
   };
 
-  let default = &DEFAULT_ENTRYPOINT_FILE_NAME.to_owned();
-  let frontend_entrypoint_path = frontend_entrypoint.as_ref().unwrap_or(default);
+  let frontend_entrypoint_path = frontend_entrypoint
+    .as_deref()
+    .unwrap_or(DEFAULT_ENTRYPOINT_FILE_NAME);
   match pkgs_repo.get_installed_file(frontend_entrypoint_path).await {
     Ok(_) => Ok(()),
     Err(err) => Err(FrontendPkgErr::EntrypointNotFound(format!(
-      "entrypoint file \"{frontend_entrypoint_path}\" does not exist in project home directory: {err}"
+      "entrypoint file {frontend_entrypoint_path} does not exist in project home directory: {err}"
     ))),
   }
 }
@@ -161,7 +162,7 @@ impl Display for FrontendPkgErr {
       FrontendPkgErr::PkgInstallFailed(err) => write!(f, "package install failed: {err}"),
       FrontendPkgErr::EntrypointNotFound(error) => write!(
         f,
-        "frontend cannot be served due to lack of an entrypoint file: {error:?}"
+        "frontend cannot be served due to lack of an entrypoint file: {error}"
       ),
       FrontendPkgErr::HomeDirInaccessible(error) => {
         write!(f, "the program could not read it's home directory: {error}")
