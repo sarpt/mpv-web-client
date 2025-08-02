@@ -27,11 +27,11 @@ struct ApiErr {
 }
 
 pub async fn check_latest_frontend_release(
-  pkgs_repo: &mut PackagesRepository,
+  pkgs_repo: &PackagesRepository,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
   let response = match get_remote_release(Version::Latest).await {
     Ok(latest_release) => {
-      let local_version = pkgs_repo.get_installed().await.map_or(None, |installed| {
+      let local_version = pkgs_repo.get_installed().map_or(None, |installed| {
         Some(installed.manifest.version_info.version)
       });
       let response_body = CheckLatestResponseBody {

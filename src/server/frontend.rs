@@ -13,15 +13,17 @@ use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio_util::io::ReaderStream;
 
-use crate::frontend::{INDEX_FILE_NAME, get_frontend_file};
+use crate::frontend::INDEX_FILE_NAME;
+use crate::frontend::pkg::repository::PackagesRepository;
 use crate::server::common::ServiceError;
 
 const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
 pub async fn serve_frontend(
   name: Option<&str>,
   encodings: Vec<String>,
+  pkgs_repo: &PackagesRepository,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  let file_to_serve = match decide_file_to_serve(name, &encodings).await {
+  let file_to_serve = match decide_file_to_serve(name, &encodings, pkgs_repo).await {
     Some(served_file_info) => served_file_info,
     None => {
       return Err(*Box::<ServiceError>::new(
@@ -66,7 +68,11 @@ struct ServedFile {
   meta: ServedFileMeta,
 }
 
-async fn decide_file_to_serve(name: Option<&str>, encodings: &[String]) -> Option<ServedFile> {
+async fn decide_file_to_serve(
+  name: Option<&str>,
+  encodings: &[String],
+  pkgs_repo: &PackagesRepository,
+) -> Option<ServedFile> {
   let mut file_candidates: VecDeque<ServedFileMeta> = VecDeque::new();
   // fallback to index file on unmatched paths
   // required for BrowserRouter in mpv-web-frontend
@@ -113,7 +119,7 @@ async fn decide_file_to_serve(name: Option<&str>, encodings: &[String]) -> Optio
   let mut src_file_opt: Option<ServedFile> = None;
   for file_candidate in file_candidates {
     let src_file_name = &file_candidate.file_name;
-    match get_frontend_file(src_file_name).await {
+    match pkgs_repo.get_installed_file(src_file_name).await {
       Ok((file, path)) => {
         src_file_opt = Some(ServedFile {
           file,
