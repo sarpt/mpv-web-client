@@ -151,6 +151,7 @@ pub enum FrontendPkgErr {
   PkgInvalid(String),
   PkgOutdated(String, String),
   ManifestInvalid(String),
+  PackageUnavailable(String),
   HomeDirInaccessible(std::io::Error),
   RemoteReleaseCheckFailure(ReleaseFetchErr),
 }
@@ -176,6 +177,9 @@ impl Display for FrontendPkgErr {
       ),
       FrontendPkgErr::ManifestInvalid(msg) => {
         write!(f, "frontend package manifest is in incorrect format: {msg}")
+      }
+      FrontendPkgErr::PackageUnavailable(msg) => {
+        write!(f, "frontend package is not available: {msg}")
       }
       FrontendPkgErr::RemoteReleaseCheckFailure(err) => {
         write!(f, "check for the latest version failed: {err}")
