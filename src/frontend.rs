@@ -35,9 +35,9 @@ pub async fn init_frontend(
     }
   }
 
-  if let Some(ref path) = pkg_path {
+  if let Some(path) = pkg_path {
     pkgs_repository
-      .install_package(path.to_owned(), force_outdated)
+      .install_package(path, force_outdated)
       .await
       .map_err(|err| format!("frontend package install failed: {err}"))?;
   }

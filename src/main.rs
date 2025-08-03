@@ -1,5 +1,6 @@
 use clap::Parser;
 use log::{error, info, warn};
+use nix::ifaddrs::getifaddrs;
 use std::{error::Error, net::Ipv4Addr, path::PathBuf, sync::Arc, time::SystemTime};
 use tokio::sync::Mutex;
 
@@ -26,7 +27,7 @@ struct Args {
     long,
     default_value_t = Ipv4Addr::from(DEFAULT_IPADDR),
     required = false,
-    help = "IP address used for serving frontend"
+    help = "IP address used for serving frontend. Does not apply when --interface provided."
   )]
   ip_address: Ipv4Addr,
 
@@ -37,6 +38,13 @@ struct Args {
     help = "Port used for serving frontend"
   )]
   port: u16,
+
+  #[arg(
+    long,
+    required = false,
+    help = "Name of the interface used for serving frontend. Overwrites --ip-address."
+  )]
+  interface: Option<String>,
 
   #[arg(
     long,
@@ -91,7 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
   ensure_project_dirs()?;
   let mut packages_repository = PackagesRepository::new();
   init_frontend(
-    args.pkg,
+    args.pkg.clone(),
     args.update,
     args.force_outdated,
     &mut packages_repository,
@@ -101,18 +109,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
   let idle_shutdown_interval = if args.enable_idle_shutdown_timeout {
     warn!(
       "server will shut down after being idle for {} seconds!",
-      args.idle_shutdown_timeout
+      &args.idle_shutdown_timeout
     );
     Some(args.idle_shutdown_timeout)
   } else {
     None
   };
 
+  let ip_address = match decide_ip(&args) {
+    Some(addr) => addr,
+    None => {
+      return Err(*Box::new(
+        "could not resolve ip address for provided interface".to_string().into(),
+      ));
+    }
+  };
+
   let server_dependencies = server::Dependencies {
     packages_repository: Arc::new(Mutex::new(packages_repository)),
   };
   if let Err(err) = serve(
-    args.ip_address,
+    ip_address,
     args.port,
     idle_shutdown_interval,
     server_dependencies,
@@ -124,6 +141,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
   }
 
   Ok(())
+}
+
+fn decide_ip(args: &Args) -> Option<Ipv4Addr> {
+  let if_name = match args.interface {
+    Some(ref name) => name,
+    None => return Some(args.ip_address),
+  };
+
+  let mut ifaddrs_iter = getifaddrs().ok()?;
+  ifaddrs_iter.find_map(|ifadrr| {
+    if ifadrr.interface_name != *if_name {
+      return None;
+    }
+
+    Some(ifadrr.address?.as_sockaddr_in()?.ip())
+  })
 }
 
 fn init_logging() -> Result<(), fern::InitError> {
