@@ -1,6 +1,6 @@
 use clap::Parser;
 use log::{error, info, warn};
-use std::{error::Error, path::PathBuf, sync::Arc, time::SystemTime};
+use std::{error::Error, net::Ipv4Addr, path::PathBuf, sync::Arc, time::SystemTime};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -14,12 +14,30 @@ mod frontend;
 mod project_paths;
 mod server;
 
+const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
+const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_IDLE_SHUTDOWN_TIMEOUT: u8 = 60;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser, Debug)]
 #[command(version = VERSION, about = "client for mpv-web-api and mpv-web-front server", long_about = None)]
 struct Args {
+  #[arg(
+    long,
+    default_value_t = Ipv4Addr::from(DEFAULT_IPADDR),
+    required = false,
+    help = "IP address used for serving frontend"
+  )]
+  ip_address: Ipv4Addr,
+
+  #[arg(
+    long,
+    default_value_t = DEFAULT_PORT,
+    required = false,
+    help = "Port used for serving frontend"
+  )]
+  port: u16,
+
   #[arg(
     long,
     required = false,
@@ -93,8 +111,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
   let server_dependencies = server::Dependencies {
     packages_repository: Arc::new(Mutex::new(packages_repository)),
   };
-  if let Err(err) = serve(idle_shutdown_interval, server_dependencies).await {
-    error!("error encountered while serving: {err}");
+  if let Err(err) = serve(
+    args.ip_address,
+    args.port,
+    idle_shutdown_interval,
+    server_dependencies,
+  )
+  .await
+  {
+    error!("error encountered while serving frontend: {err}");
     return Err(err);
   }
 

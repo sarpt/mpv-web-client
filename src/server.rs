@@ -30,8 +30,6 @@ mod common;
 mod frontend;
 mod router;
 
-const DEFAULT_PORT: u16 = 3000;
-const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
 const GRACEFUL_SHUTDOWN_TIMEOUT_SEC: u8 = 30;
 
 #[derive(Clone)]
@@ -40,10 +38,12 @@ pub struct Dependencies {
 }
 
 pub async fn serve(
+  ip_address: Ipv4Addr,
+  port: u16,
   idle_shutdown_timeout: Option<u32>,
   dependencies: Dependencies,
 ) -> Result<(), Box<dyn Error>> {
-  let addr = SocketAddr::from((Ipv4Addr::from(DEFAULT_IPADDR), DEFAULT_PORT));
+  let addr = SocketAddr::from((ip_address, port));
   let listener = TcpListener::bind(addr).await?;
   let graceful = graceful::GracefulShutdown::new();
   let main_service_shutdown_notifier = Arc::new(Notify::new());
