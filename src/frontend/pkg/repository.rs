@@ -219,7 +219,7 @@ fn copy_frontend_pkg_to_home(version: &Semver) -> Result<(), FrontendPkgErr> {
 }
 
 async fn move_manifest_to_project_home(version: &Semver) -> Result<(), FrontendPkgErr> {
-  let mut frontend_dir = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?; // this should also use version
+  let mut frontend_dir = get_frontend_dir().map_err(FrontendPkgErr::HomeDirInaccessible)?;
   frontend_dir.push(version.to_string());
   let manifest_file_path = {
     let mut path = frontend_dir.clone();

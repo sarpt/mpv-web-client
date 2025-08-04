@@ -1,6 +1,7 @@
 use clap::Parser;
 use log::{error, info, warn};
-use std::{error::Error, path::PathBuf, sync::Arc, time::SystemTime};
+use nix::ifaddrs::getifaddrs;
+use std::{error::Error, net::Ipv4Addr, path::PathBuf, sync::Arc, time::SystemTime};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -14,12 +15,37 @@ mod frontend;
 mod project_paths;
 mod server;
 
+const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
+const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_IDLE_SHUTDOWN_TIMEOUT: u8 = 60;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser, Debug)]
 #[command(version = VERSION, about = "client for mpv-web-api and mpv-web-front server", long_about = None)]
 struct Args {
+  #[arg(
+    long,
+    default_value_t = Ipv4Addr::from(DEFAULT_IPADDR),
+    required = false,
+    help = "IP address used for serving frontend. Does not apply when --interface provided."
+  )]
+  ip_address: Ipv4Addr,
+
+  #[arg(
+    long,
+    default_value_t = DEFAULT_PORT,
+    required = false,
+    help = "Port used for serving frontend"
+  )]
+  port: u16,
+
+  #[arg(
+    long,
+    required = false,
+    help = "Name of the interface used for serving frontend. Overwrites --ip-address."
+  )]
+  interface: Option<String>,
+
   #[arg(
     long,
     required = false,
@@ -73,7 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
   ensure_project_dirs()?;
   let mut packages_repository = PackagesRepository::new();
   init_frontend(
-    args.pkg,
+    args.pkg.clone(),
     args.update,
     args.force_outdated,
     &mut packages_repository,
@@ -83,22 +109,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
   let idle_shutdown_interval = if args.enable_idle_shutdown_timeout {
     warn!(
       "server will shut down after being idle for {} seconds!",
-      args.idle_shutdown_timeout
+      &args.idle_shutdown_timeout
     );
     Some(args.idle_shutdown_timeout)
   } else {
     None
   };
 
+  let ip_address = match decide_ip(&args) {
+    Ok(addr) => addr,
+    Err(msg) => {
+      return Err(*Box::new(msg.into()));
+    }
+  };
+
   let server_dependencies = server::Dependencies {
     packages_repository: Arc::new(Mutex::new(packages_repository)),
   };
-  if let Err(err) = serve(idle_shutdown_interval, server_dependencies).await {
-    error!("error encountered while serving: {err}");
+  if let Err(err) = serve(
+    ip_address,
+    args.port,
+    idle_shutdown_interval,
+    server_dependencies,
+  )
+  .await
+  {
+    error!("error encountered while serving frontend: {err}");
     return Err(err);
   }
 
   Ok(())
+}
+
+fn decide_ip(args: &Args) -> Result<Ipv4Addr, String> {
+  let if_name = match args.interface {
+    Some(ref name) => name,
+    None => return Ok(args.ip_address),
+  };
+
+  let mut ifaddrs_iter =
+    getifaddrs().map_err(|err| format!("could not probe for interfaces: {err}").to_string())?;
+
+  ifaddrs_iter
+    .find_map(|ifadrr| {
+      if ifadrr.interface_name != *if_name {
+        return None;
+      }
+
+      Some(ifadrr.address?.as_sockaddr_in()?.ip())
+    })
+    .ok_or(format!("could not resolve ip address for provided interface {if_name}").to_string())
 }
 
 fn init_logging() -> Result<(), fern::InitError> {
