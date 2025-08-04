@@ -117,11 +117,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
   };
 
   let ip_address = match decide_ip(&args) {
-    Some(addr) => addr,
-    None => {
-      return Err(*Box::new(
-        "could not resolve ip address for provided interface".to_string().into(),
-      ));
+    Ok(addr) => addr,
+    Err(msg) => {
+      return Err(*Box::new(msg.into()));
     }
   };
 
@@ -143,20 +141,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-fn decide_ip(args: &Args) -> Option<Ipv4Addr> {
+fn decide_ip(args: &Args) -> Result<Ipv4Addr, String> {
   let if_name = match args.interface {
     Some(ref name) => name,
-    None => return Some(args.ip_address),
+    None => return Ok(args.ip_address),
   };
 
-  let mut ifaddrs_iter = getifaddrs().ok()?;
-  ifaddrs_iter.find_map(|ifadrr| {
-    if ifadrr.interface_name != *if_name {
-      return None;
-    }
+  let mut ifaddrs_iter =
+    getifaddrs().map_err(|err| format!("could not probe for interfaces: {err}").to_string())?;
 
-    Some(ifadrr.address?.as_sockaddr_in()?.ip())
-  })
+  ifaddrs_iter
+    .find_map(|ifadrr| {
+      if ifadrr.interface_name != *if_name {
+        return None;
+      }
+
+      Some(ifadrr.address?.as_sockaddr_in()?.ip())
+    })
+    .ok_or(format!("could not resolve ip address for provided interface {if_name}").to_string())
 }
 
 fn init_logging() -> Result<(), fern::InitError> {
