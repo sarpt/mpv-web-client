@@ -1,7 +1,9 @@
 use clap::Parser;
 use log::{error, info, warn};
 use nix::ifaddrs::getifaddrs;
-use std::{error::Error, net::Ipv4Addr, path::PathBuf, sync::Arc, time::SystemTime};
+use std::{
+  error::Error, net::Ipv4Addr, ops::RangeInclusive, path::PathBuf, sync::Arc, time::SystemTime,
+};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -16,7 +18,7 @@ mod project_paths;
 mod server;
 
 const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
-const DEFAULT_PORT: u16 = 3000;
+const PORT_RANGE: RangeInclusive<u16> = 7000..=9000;
 const DEFAULT_IDLE_SHUTDOWN_TIMEOUT: u8 = 60;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -31,13 +33,8 @@ struct Args {
   )]
   ip_address: Ipv4Addr,
 
-  #[arg(
-    long,
-    default_value_t = DEFAULT_PORT,
-    required = false,
-    help = "Port used for serving frontend"
-  )]
-  port: u16,
+  #[arg(long, required = false, help = "Port used for serving frontend")]
+  port: Option<u16>,
 
   #[arg(
     long,
@@ -122,13 +119,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
       return Err(*Box::new(msg.into()));
     }
   };
+  let port = decide_port(&args);
 
   let server_dependencies = server::Dependencies {
     packages_repository: Arc::new(Mutex::new(packages_repository)),
   };
   if let Err(err) = serve(
     ip_address,
-    args.port,
+    port,
     idle_shutdown_interval,
     server_dependencies,
   )
@@ -159,6 +157,10 @@ fn decide_ip(args: &Args) -> Result<Ipv4Addr, String> {
       Some(ifadrr.address?.as_sockaddr_in()?.ip())
     })
     .ok_or(format!("could not resolve ip address for provided interface {if_name}").to_string())
+}
+
+fn decide_port(args: &Args) -> u16 {
+  args.port.unwrap_or(rand::random_range(PORT_RANGE))
 }
 
 fn init_logging() -> Result<(), fern::InitError> {

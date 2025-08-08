@@ -92,15 +92,14 @@ async fn decide_file_to_serve(
     mime: entrypoint_mime_type.clone(),
     encoding: entrypoint_encoding,
   });
-  if entrypoint_encoding.is_none() && should_file_be_encoded(&entrypoint_mime_type) {
-    if let Some((ext, encoding)) = decide_encoding_extension(encodings) {
+  if entrypoint_encoding.is_none() && should_file_be_encoded(&entrypoint_mime_type)
+    && let Some((ext, encoding)) = decide_encoding_extension(encodings) {
       file_candidates.push_front(ServedFileMeta {
         file_name: format!("{entrypoint_fallback_name}.{ext}"),
         mime: entrypoint_mime_type,
         encoding: Some(encoding),
       });
     }
-  }
 
   if let Some(name) = name {
     let (file_mime_type, file_encoding) = file_mime_and_encoding(name);
@@ -109,15 +108,14 @@ async fn decide_file_to_serve(
       file_name: name.to_owned(),
       encoding: file_encoding,
     });
-    if file_encoding.is_none() && should_file_be_encoded(&file_mime_type) {
-      if let Some((ext, encoding)) = decide_encoding_extension(encodings) {
+    if file_encoding.is_none() && should_file_be_encoded(&file_mime_type)
+      && let Some((ext, encoding)) = decide_encoding_extension(encodings) {
         file_candidates.push_front(ServedFileMeta {
           mime: file_mime_type,
           file_name: format!("{name}.{ext}"),
           encoding: Some(encoding),
         });
       }
-    }
   };
 
   let mut src_file_opt: Option<ServedFile> = None;
