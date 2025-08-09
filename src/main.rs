@@ -1,16 +1,18 @@
 use clap::Parser;
 use log::{error, info, warn};
-use nix::ifaddrs::getifaddrs;
+use nix::{errno::Errno, ifaddrs::getifaddrs};
 use std::{
-  error::Error, net::Ipv4Addr, ops::RangeInclusive, path::PathBuf, sync::Arc, time::SystemTime,
+  error::Error, fmt::Display, io::ErrorKind, net::Ipv4Addr, ops::RangeInclusive, path::PathBuf,
+  sync::Arc, time::SystemTime,
 };
-use tokio::sync::Mutex;
+use tokio::{net::TcpListener, sync::Mutex};
 
 use crate::{
   frontend::{init_frontend, pkg::repository::PackagesRepository},
   project_paths::ensure_project_dirs,
   server::serve,
 };
+use std::net::SocketAddr;
 
 mod common;
 mod frontend;
@@ -113,25 +115,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     None
   };
 
-  let ip_address = match decide_ip(&args) {
-    Ok(addr) => addr,
-    Err(msg) => {
-      return Err(*Box::new(msg.into()));
-    }
-  };
-  let port = decide_port(&args);
-
+  let tcp_listener = get_tcp_listener(&args)
+    .await
+    .map_err(|err| *Box::new(err))?;
   let server_dependencies = server::Dependencies {
     packages_repository: Arc::new(Mutex::new(packages_repository)),
   };
-  if let Err(err) = serve(
-    ip_address,
-    port,
-    idle_shutdown_interval,
-    server_dependencies,
-  )
-  .await
-  {
+
+  if let Err(err) = serve(tcp_listener, idle_shutdown_interval, server_dependencies).await {
     error!("error encountered while serving frontend: {err}");
     return Err(err);
   }
@@ -139,14 +130,63 @@ async fn main() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-fn decide_ip(args: &Args) -> Result<Ipv4Addr, String> {
+async fn get_tcp_listener(args: &Args) -> Result<TcpListener, ListenerError> {
+  let ip_address = decide_ip(args)?;
+  let port = decide_port(args);
+  let addr = SocketAddr::from((ip_address, port));
+
+  let listener = TcpListener::bind(addr)
+    .await
+    .map_err(|err| match err.kind() {
+      ErrorKind::AddrInUse => ListenerError::AddressInUse(addr),
+      kind => ListenerError::BindFailure(addr, kind),
+    })?;
+  info!("accepting connections at {addr}");
+  Ok(listener)
+}
+
+#[derive(Clone)]
+enum ListenerError {
+  InterfaceProbeFail(Errno),
+  InterfaceAddressResolveFail(String),
+  AddressInUse(SocketAddr),
+  BindFailure(SocketAddr, ErrorKind),
+}
+
+impl Display for ListenerError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match &self {
+      ListenerError::AddressInUse(addr) => write!(f, "address {addr} is already in use"),
+      ListenerError::BindFailure(addr, kind) => {
+        write!(f, "could not bind to address {addr} - error kind: {kind}")
+      }
+      ListenerError::InterfaceProbeFail(errno) => write!(
+        f,
+        "could not probe for available interfaces - error number: {errno}"
+      ),
+      ListenerError::InterfaceAddressResolveFail(if_name) => write!(
+        f,
+        "could not resolve ip address for provided interface {if_name}"
+      ),
+    }
+  }
+}
+
+impl std::fmt::Debug for ListenerError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", &self)
+  }
+}
+
+impl Error for ListenerError {}
+
+fn decide_ip(args: &Args) -> Result<Ipv4Addr, ListenerError> {
   let if_name = match args.interface {
     Some(ref name) => name,
     None => return Ok(args.ip_address),
   };
 
-  let mut ifaddrs_iter =
-    getifaddrs().map_err(|err| format!("could not probe for interfaces: {err}").to_string())?;
+  let mut ifaddrs_iter = getifaddrs().map_err(ListenerError::InterfaceProbeFail)?;
 
   ifaddrs_iter
     .find_map(|ifadrr| {
@@ -156,7 +196,9 @@ fn decide_ip(args: &Args) -> Result<Ipv4Addr, String> {
 
       Some(ifadrr.address?.as_sockaddr_in()?.ip())
     })
-    .ok_or(format!("could not resolve ip address for provided interface {if_name}").to_string())
+    .ok_or(ListenerError::InterfaceAddressResolveFail(
+      if_name.to_string(),
+    ))
 }
 
 fn decide_port(args: &Args) -> u16 {
