@@ -132,17 +132,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn get_tcp_listener(args: &Args) -> Result<TcpListener, ListenerError> {
   let ip_address = decide_ip(args)?;
-  let port = decide_port(args);
-  let addr = SocketAddr::from((ip_address, port));
+  loop {
+    let port = decide_port(args);
+    let addr = SocketAddr::from((ip_address, port));
 
-  let listener = TcpListener::bind(addr)
-    .await
-    .map_err(|err| match err.kind() {
-      ErrorKind::AddrInUse => ListenerError::AddressInUse(addr),
-      kind => ListenerError::BindFailure(addr, kind),
-    })?;
-  info!("accepting connections at {addr}");
-  Ok(listener)
+    let listener = match TcpListener::bind(addr).await {
+      Ok(listener) => listener,
+      Err(err) => match err.kind() {
+        ErrorKind::AddrInUse => {
+          if args.port.is_some() {
+            return Err(ListenerError::AddressInUse(addr));
+          }
+
+          info!("randomly selected address {addr} is in use, retrying...");
+          continue;
+        }
+        kind => {
+          return Err(ListenerError::BindFailure(addr, kind));
+        }
+      },
+    };
+
+    info!("accepting connections at {addr}");
+    return Ok(listener);
+  }
 }
 
 #[derive(Clone)]
