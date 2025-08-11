@@ -21,6 +21,7 @@ mod server;
 
 const DEFAULT_IPADDR: [u8; 4] = [127, 0, 0, 1];
 const PORT_RANGE: RangeInclusive<u16> = 7000..=9000;
+const DEFAULT_SOCKET_RETRIES: u8 = 8;
 const DEFAULT_IDLE_SHUTDOWN_TIMEOUT: u8 = 60;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -37,6 +38,14 @@ struct Args {
 
   #[arg(long, required = false, help = "Port used for serving frontend")]
   port: Option<u16>,
+
+  #[arg(
+    long,
+    default_value_t = DEFAULT_SOCKET_RETRIES,
+    required = false,
+    help = "Number of retries the application will try to bind on a socket when it's not available. Does not apply when --port provided."
+  )]
+  socket_retries: u8,
 
   #[arg(
     long,
@@ -131,6 +140,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn get_tcp_listener(args: &Args) -> Result<TcpListener, ListenerError> {
+  let mut bind_attempts = 1;
   let ip_address = decide_ip(args)?;
   loop {
     let port = decide_port(args);
@@ -140,11 +150,15 @@ async fn get_tcp_listener(args: &Args) -> Result<TcpListener, ListenerError> {
       Ok(listener) => listener,
       Err(err) => match err.kind() {
         ErrorKind::AddrInUse => {
-          if args.port.is_some() {
+          if args.port.is_some() || bind_attempts >= args.socket_retries {
             return Err(ListenerError::AddressInUse(addr));
           }
 
-          info!("randomly selected address {addr} is in use, retrying...");
+          info!(
+            "randomly selected address {addr} is in use, attempt {}/{}; retrying ...",
+            bind_attempts, args.socket_retries
+          );
+          bind_attempts += 1;
           continue;
         }
         kind => {
