@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::net::{Ipv4Addr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,24 +30,19 @@ mod frontend;
 mod router;
 
 const GRACEFUL_SHUTDOWN_TIMEOUT_SEC: u8 = 30;
-
 #[derive(Clone)]
 pub struct Dependencies {
   pub packages_repository: Arc<Mutex<PackagesRepository>>,
 }
 
 pub async fn serve(
-  ip_address: Ipv4Addr,
-  port: u16,
+  listener: TcpListener,
   idle_shutdown_timeout: Option<u32>,
   dependencies: Dependencies,
 ) -> Result<(), Box<dyn Error>> {
-  let addr = SocketAddr::from((ip_address, port));
-  let listener = TcpListener::bind(addr).await?;
   let graceful = graceful::GracefulShutdown::new();
   let main_service_shutdown_notifier = Arc::new(Notify::new());
 
-  info!("accepting connections at {addr}");
   loop {
     let shutdown_notifier = main_service_shutdown_notifier.clone();
 

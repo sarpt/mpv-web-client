@@ -25,14 +25,14 @@ pub async fn init_frontend(
   pkgs_repository.init().await;
 
   let mut pkg_path = pkg;
-  if pkg_path.is_none() {
-    if let Some(new_release) = remote_frontend_release_available(update, pkgs_repository).await {
-      info!(
-        "fetching new frontend package version \"{}\"",
-        new_release.name
-      );
-      pkg_path = fetch_new_frontend_release(&new_release).await;
-    }
+  if pkg_path.is_none()
+    && let Some(new_release) = remote_frontend_release_available(update, pkgs_repository).await
+  {
+    info!(
+      "fetching new frontend package version \"{}\"",
+      new_release.name
+    );
+    pkg_path = fetch_new_frontend_release(&new_release).await;
   }
 
   if let Some(path) = pkg_path {
