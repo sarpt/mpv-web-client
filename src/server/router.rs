@@ -1,5 +1,5 @@
 use http_body_util::BodyExt;
-use hyper::{Method, Request};
+use hyper::{Method, Request, body::Incoming};
 use route_recognizer::Router;
 use serde::Deserialize;
 
@@ -14,6 +14,12 @@ enum ApiPathRoutes {
   FrontendLatest,
   FrontendUpdate,
   Shutdown,
+  ApiServers(ApiServersPathRoutes),
+}
+
+enum ApiServersPathRoutes {
+  Spawn,
+  All,
 }
 
 pub enum Routes {
@@ -25,12 +31,18 @@ pub enum ApiRoutes {
   FrontendLatest,
   FrontendUpdate(Semver),
   Shutdown,
+  ApiServers(ApiServersRoutes),
+}
+
+pub enum ApiServersRoutes {
+  Spawn(String),
+  All,
 }
 
 pub enum RoutingErr {
   Unmatched,
   InvalidMethod,
-  InvalidRequest(String),
+  InvalidRequestBody(String),
 }
 
 pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, RoutingErr> {
@@ -43,6 +55,14 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
   router.add(
     "/api/frontend/update",
     PathRoutes::Api(ApiPathRoutes::FrontendUpdate),
+  );
+  router.add(
+    "/api/servers/spawn",
+    PathRoutes::Api(ApiPathRoutes::ApiServers(ApiServersPathRoutes::Spawn)),
+  );
+  router.add(
+    "/api/servers",
+    PathRoutes::Api(ApiPathRoutes::ApiServers(ApiServersPathRoutes::All)),
   );
   router.add("/api/shutdown", PathRoutes::Api(ApiPathRoutes::Shutdown));
   router.add("/*path", PathRoutes::Frontend);
@@ -61,6 +81,19 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
       parse_accepted_encodings(req),
     )),
     PathRoutes::Api(api_path) => match api_path {
+      ApiPathRoutes::ApiServers(api_servers_path) => match api_servers_path {
+        ApiServersPathRoutes::Spawn => {
+          if req.method() != Method::POST {
+            return Err(RoutingErr::InvalidMethod);
+          }
+
+          let body = parse_request_body::<LocalApiServerSpawnRequest>(req).await?;
+          Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::Spawn(
+            body.name,
+          ))))
+        }
+        ApiServersPathRoutes::All => Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::All))),
+      },
       ApiPathRoutes::Shutdown => Ok(Routes::Api(ApiRoutes::Shutdown)),
       ApiPathRoutes::FrontendLatest => Ok(Routes::Api(ApiRoutes::FrontendLatest)),
       ApiPathRoutes::FrontendUpdate => {
@@ -68,20 +101,8 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
           return Err(RoutingErr::InvalidMethod);
         }
 
-        let body_bytes = req
-          .into_body()
-          .collect()
-          .await
-          .map_err(|err| RoutingErr::InvalidRequest(format!("invalid body: {err}")))?
-          .to_bytes();
-        let request_string = String::from_utf8(body_bytes.into())
-          .map_err(|err| RoutingErr::InvalidRequest(format!("invalid body: {err}")))?;
-
-        let request: FrontendUpdateRequest = serde_json::from_str(request_string.as_ref())
-          .map_err(|err| {
-            RoutingErr::InvalidRequest(format!("incorrect version provided: {err}"))
-          })?;
-        Ok(Routes::Api(ApiRoutes::FrontendUpdate(request.version)))
+        let body = parse_request_body::<FrontendUpdateRequest>(req).await?;
+        Ok(Routes::Api(ApiRoutes::FrontendUpdate(body.version)))
       }
     },
   }
@@ -90,6 +111,31 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
 #[derive(Deserialize)]
 struct FrontendUpdateRequest {
   version: Semver,
+}
+
+#[derive(Deserialize)]
+struct LocalApiServerSpawnRequest {
+  name: String,
+}
+
+async fn parse_request_body<T>(req: Request<Incoming>) -> Result<T, RoutingErr>
+where
+  T: for<'a> Deserialize<'a>,
+{
+  let body_bytes = req
+    .into_body()
+    .collect()
+    .await
+    .map_err(|err| RoutingErr::InvalidRequestBody(format!("cannot collect request body: {err}")))?
+    .to_bytes();
+  let request_string = String::from_utf8(body_bytes.into()).map_err(|err| {
+    RoutingErr::InvalidRequestBody(format!("cannot convert body to string: {err}"))
+  })?;
+
+  let request: T = serde_json::from_str(request_string.as_ref()).map_err(|err| {
+    RoutingErr::InvalidRequestBody(format!("incorrect request body provided: {err}"))
+  })?;
+  Ok(request)
 }
 
 const ENCODINGS_SEPARATOR: &str = ",";

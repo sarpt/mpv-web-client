@@ -128,6 +128,10 @@ where
           .await
         }
         router::ApiRoutes::Shutdown => trigger_shutdown(shutdown_notifier).await,
+        router::ApiRoutes::ApiServers(api_servers_path) => match api_servers_path {
+          router::ApiServersRoutes::Spawn(_) => todo!(),
+          router::ApiServersRoutes::All => todo!(),
+        },
       },
     },
     Err(err) => {
@@ -139,7 +143,7 @@ where
         router::RoutingErr::InvalidMethod => {
           *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
         }
-        router::RoutingErr::InvalidRequest(e) => {
+        router::RoutingErr::InvalidRequestBody(e) => {
           *response.status_mut() = StatusCode::BAD_REQUEST;
           *response.body_mut() = full_body(format!("request invalid: {e}"));
         }
