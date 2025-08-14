@@ -16,6 +16,7 @@ use tokio::select;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::sleep;
 
+use crate::api::ApiServersService;
 use crate::frontend::pkg::repository::PackagesRepository;
 use crate::server::api::{
   check_latest_frontend_release, trigger_shutdown, update_frontend_package,
@@ -33,6 +34,7 @@ const GRACEFUL_SHUTDOWN_TIMEOUT_SEC: u8 = 30;
 #[derive(Clone)]
 pub struct Dependencies {
   pub packages_repository: Arc<Mutex<PackagesRepository>>,
+  pub api_service: Arc<Mutex<ApiServersService>>,
 }
 
 pub async fn serve(
