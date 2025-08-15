@@ -19,7 +19,7 @@ use tokio::time::sleep;
 use crate::api::ApiServersService;
 use crate::frontend::pkg::repository::PackagesRepository;
 use crate::server::api::{
-  check_latest_frontend_release, trigger_shutdown, update_frontend_package,
+  check_latest_frontend_release, spawn_local_server, trigger_shutdown, update_frontend_package,
 };
 use crate::server::common::{ServiceError, empty_body, full_body};
 use crate::server::frontend::serve_frontend;
@@ -129,7 +129,9 @@ where
         }
         router::ApiRoutes::Shutdown => trigger_shutdown(shutdown_notifier).await,
         router::ApiRoutes::ApiServers(api_servers_path) => match api_servers_path {
-          router::ApiServersRoutes::Spawn(_) => todo!(),
+          router::ApiServersRoutes::Spawn(name) => {
+            spawn_local_server(name, dependencies.api_service.lock().await.deref_mut())
+          }
           router::ApiServersRoutes::All => todo!(),
         },
       },

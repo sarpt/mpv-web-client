@@ -7,6 +7,7 @@ use hyper::{Response, StatusCode};
 use serde::Serialize;
 use tokio::sync::Notify;
 
+use crate::api::ApiServersService;
 use crate::common::semver::Semver;
 use crate::frontend::pkg::repository::PackagesRepository;
 use crate::frontend::releases::{
@@ -115,4 +116,24 @@ where
   notifier.notify_waiters();
   let response = Response::new(empty_body());
   Ok(response)
+}
+
+pub fn spawn_local_server(
+  name: String,
+  servers_service: &mut ApiServersService,
+) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
+  match servers_service.start(name) {
+    Ok(()) => {
+      let response = Response::new(empty_body());
+      Ok(response)
+    }
+    Err(err) => {
+      let body = serde_json::to_string(&ApiErr {
+        err_msg: format!("could not spawn a new api instance: {err}"),
+      })?;
+      let mut response = Response::new(full_body(body));
+      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      Ok(response)
+    }
+  }
 }
