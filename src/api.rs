@@ -18,7 +18,7 @@ impl ApiServersService {
     }
   }
 
-  pub fn start(&mut self, name: String) -> Result<(), String> {
+  pub fn spawn(&mut self, name: String) -> Result<(), String> {
     let handle = Command::new("mpv-web-api")
       .spawn()
       .map_err(|err| format!("could not spawn an api instance: {}", err))?;

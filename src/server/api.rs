@@ -2,7 +2,6 @@ use std::ops::Deref;
 
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
-use hyper::header::HeaderValue;
 use hyper::{Response, StatusCode};
 use serde::Serialize;
 use tokio::sync::Notify;
@@ -13,7 +12,7 @@ use crate::frontend::pkg::repository::PackagesRepository;
 use crate::frontend::releases::{
   Release, Version, fetch_remote_frontend_package_release, get_remote_release,
 };
-use crate::server::common::{ServiceError, empty_body, full_body};
+use crate::server::common::{ServiceError, empty_body, json_response};
 
 #[derive(Serialize)]
 struct CheckLatestResponseBody {
@@ -40,20 +39,14 @@ pub async fn check_latest_frontend_release(
         latest_release,
         local_version,
       };
-      let body_text = serde_json::to_string(&response_body).map_err(Box::new)?;
-      let body = full_body(body_text);
-      let mut response = Response::new(body);
-      response.headers_mut().append(
-        "Content-Type",
-        HeaderValue::from_str(mime_guess::mime::APPLICATION_JSON.as_ref()).unwrap(),
-      );
-      response
+      let body = serde_json::to_string(&response_body).map_err(Box::new)?;
+      json_response(body)
     }
     Err(err) => {
       let body = serde_json::to_string(&ApiErr {
         err_msg: format!("could not fetch latest release: {err}"),
       })?;
-      let mut response = Response::new(full_body(body));
+      let mut response = json_response(body);
       *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
       response
     }
@@ -72,7 +65,7 @@ pub async fn update_frontend_package(
       let body = serde_json::to_string(&ApiErr {
         err_msg: format!("could not fetch release info for version {version}: {err}"),
       })?;
-      let mut response = Response::new(full_body(body));
+      let mut response = json_response(body);
       *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
       return Ok(response);
     }
@@ -84,7 +77,7 @@ pub async fn update_frontend_package(
       let body = serde_json::to_string(&ApiErr {
         err_msg: format!("could not fetch the \"{version}\" release: {err}"),
       })?;
-      let mut response = Response::new(full_body(body));
+      let mut response = json_response(body);
       *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
       return Ok(response);
     }
@@ -100,7 +93,7 @@ pub async fn update_frontend_package(
       let body = serde_json::to_string(&ApiErr {
         err_msg: format!("could not fetch the \"{version}\" release: {err}"),
       })?;
-      let mut response = Response::new(full_body(body));
+      let mut response = json_response(body);
       *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
       Ok(response)
     }
@@ -122,7 +115,7 @@ pub fn spawn_local_server(
   name: String,
   servers_service: &mut ApiServersService,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  match servers_service.start(name) {
+  match servers_service.spawn(name) {
     Ok(()) => {
       let response = Response::new(empty_body());
       Ok(response)
@@ -131,9 +124,40 @@ pub fn spawn_local_server(
       let body = serde_json::to_string(&ApiErr {
         err_msg: format!("could not spawn a new api instance: {err}"),
       })?;
-      let mut response = Response::new(full_body(body));
+      let mut response = json_response(body);
       *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
       Ok(response)
     }
   }
+}
+
+pub fn get_all_instances(
+  servers_service: &mut ApiServersService,
+) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
+  let instances: Vec<ApiServerInstance> = servers_service
+    .server_instances()
+    .iter()
+    .map(|inst| ApiServerInstance {
+      local: inst.local,
+      address: &inst.address,
+      name: &inst.name,
+    })
+    .collect();
+  let body = serde_json::to_string(&ApiInstancesResponse {
+    instances: &instances,
+  })?;
+  let response = json_response(body);
+  Ok(response)
+}
+
+#[derive(Serialize)]
+struct ApiServerInstance<'a> {
+  pub local: bool,
+  pub address: &'a str,
+  pub name: &'a str,
+}
+
+#[derive(Serialize)]
+struct ApiInstancesResponse<'a> {
+  instances: &'a [ApiServerInstance<'a>],
 }
