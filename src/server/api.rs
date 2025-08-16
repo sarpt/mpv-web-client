@@ -136,11 +136,10 @@ pub fn get_all_instances(
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
   let instances: Vec<ApiServerInstance> = servers_service
     .server_instances()
-    .iter()
-    .map(|inst| ApiServerInstance {
+    .map(|(name, inst)| ApiServerInstance {
       local: inst.local,
       address: &inst.address,
-      name: &inst.name,
+      name: name,
     })
     .collect();
   let body = serde_json::to_string(&ApiInstancesResponse {
