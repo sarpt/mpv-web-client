@@ -20,6 +20,7 @@ enum ApiPathRoutes {
 enum ApiServersPathRoutes {
   Spawn,
   All,
+  Stop,
 }
 
 pub enum Routes {
@@ -37,6 +38,7 @@ pub enum ApiRoutes {
 pub enum ApiServersRoutes {
   Spawn(String),
   All,
+  Stop(String),
 }
 
 pub enum RoutingErr {
@@ -59,6 +61,10 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
   router.add(
     "/api/servers/spawn",
     PathRoutes::Api(ApiPathRoutes::ApiServers(ApiServersPathRoutes::Spawn)),
+  );
+  router.add(
+    "/api/servers/stop",
+    PathRoutes::Api(ApiPathRoutes::ApiServers(ApiServersPathRoutes::Stop)),
   );
   router.add(
     "/api/servers",
@@ -92,6 +98,16 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
             body.name,
           ))))
         }
+        ApiServersPathRoutes::Stop => {
+          if req.method() != Method::POST {
+            return Err(RoutingErr::InvalidMethod);
+          }
+
+          let body = parse_request_body::<LocalApiServerStopRequest>(req).await?;
+          Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::Stop(
+            body.name,
+          ))))
+        }
         ApiServersPathRoutes::All => Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::All))),
       },
       ApiPathRoutes::Shutdown => Ok(Routes::Api(ApiRoutes::Shutdown)),
@@ -115,6 +131,11 @@ struct FrontendUpdateRequest {
 
 #[derive(Deserialize)]
 struct LocalApiServerSpawnRequest {
+  name: String,
+}
+
+#[derive(Deserialize)]
+struct LocalApiServerStopRequest {
   name: String,
 }
 

@@ -131,6 +131,26 @@ pub fn spawn_local_server(
   }
 }
 
+pub async fn stop_local_server(
+  name: String,
+  servers_service: &mut ApiServersService,
+) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
+  match servers_service.stop(name).await {
+    Ok(()) => {
+      let response = Response::new(empty_body());
+      Ok(response)
+    }
+    Err(err) => {
+      let body = serde_json::to_string(&ApiErr {
+        err_msg: format!("could not stop api instance: {err}"),
+      })?;
+      let mut response = json_response(body);
+      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      Ok(response)
+    }
+  }
+}
+
 pub fn get_all_instances(
   servers_service: &mut ApiServersService,
 ) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
@@ -139,7 +159,7 @@ pub fn get_all_instances(
     .map(|(name, inst)| ApiServerInstance {
       local: inst.local,
       address: &inst.address,
-      name: name,
+      name,
     })
     .collect();
   let body = serde_json::to_string(&ApiInstancesResponse {
