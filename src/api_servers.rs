@@ -17,6 +17,18 @@ pub struct ApiServersService {
   instances: HashMap<String, ApiServerInstance>,
 }
 
+const LOCAL_SERVER_IP_ADDR: &str = "127.0.0.1";
+const LOCAL_SERVER_BIN_NAME: &str = "mpv-web-api";
+const ADDR_ARG: &str = "--addr";
+const DIR_ARG: &str = "--dir";
+const WATCH_DIR_ARG: &str = "--watch-dir";
+
+pub struct ServerArguments {
+  pub port: u16,
+  pub dir: String,
+  pub watch_dir: bool,
+}
+
 impl ApiServersService {
   pub fn new() -> Self {
     ApiServersService {
@@ -24,13 +36,25 @@ impl ApiServersService {
     }
   }
 
-  pub fn spawn(&mut self, name: String) -> Result<(), String> {
-    let handle = Command::new("mpv-web-api")
+  pub fn spawn(&mut self, name: String, server_args: &ServerArguments) -> Result<(), String> {
+    let address = format!("{}:{}", LOCAL_SERVER_IP_ADDR, server_args.port);
+    let mut cmd = Command::new(LOCAL_SERVER_BIN_NAME);
+
+    cmd
+      .args([ADDR_ARG, &address])
+      .args([DIR_ARG, &server_args.dir]);
+
+    if server_args.watch_dir {
+      cmd.arg(WATCH_DIR_ARG);
+    }
+
+    let handle = cmd
       .spawn()
-      .map_err(|err| format!("could not spawn an api instance: {}", err))?;
+      .map_err(|err| format!("could not spawn an api instance on address {address}: {err}"))?;
+
     let instance = ApiServerInstance {
       local: true,
-      address: "127.0.0.1:3001".to_owned(),
+      address,
       handle,
     };
 

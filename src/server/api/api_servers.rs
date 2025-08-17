@@ -2,7 +2,7 @@ use hyper::{Response, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-  api_servers::ApiServersService,
+  api_servers::{ApiServersService, ServerArguments},
   server::{
     api::ApiErr,
     common::{ServiceResponse, empty_body, json_response},
@@ -12,13 +12,24 @@ use crate::{
 #[derive(Deserialize)]
 pub struct LocalApiServerSpawnRequest {
   name: String,
+  port: Option<u16>,
+  dir: String,
+  watch_dir: Option<bool>,
 }
+
+const DEFAULT_LOCAL_SERVER_PORT: u16 = 3001;
 
 pub fn spawn_local_server(
   req: LocalApiServerSpawnRequest,
   servers_service: &mut ApiServersService,
 ) -> ServiceResponse {
-  match servers_service.spawn(req.name) {
+  let server_args = ServerArguments {
+    port: req.port.unwrap_or(DEFAULT_LOCAL_SERVER_PORT),
+    dir: req.dir,
+    watch_dir: req.watch_dir.unwrap_or(false),
+  };
+
+  match servers_service.spawn(req.name, &server_args) {
     Ok(()) => {
       let response = Response::new(empty_body());
       Ok(response)
