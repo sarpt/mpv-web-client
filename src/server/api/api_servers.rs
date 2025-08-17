@@ -1,19 +1,16 @@
-use hyper::{Response, StatusCode};
+use hyper::Response;
 use serde::{Deserialize, Serialize};
 
 use crate::{
   api_servers::{ApiServersService, ServerArguments},
-  server::{
-    api::ApiErr,
-    common::{ServiceResponse, empty_body, json_response},
-  },
+  server::common::{ServiceResponse, empty_body, error_json_response, json_response},
 };
 
 #[derive(Deserialize)]
 pub struct LocalApiServerSpawnRequest {
   name: String,
   port: Option<u16>,
-  dir: String,
+  dir: Vec<String>,
   watch_dir: Option<bool>,
 }
 
@@ -23,9 +20,14 @@ pub fn spawn_local_server(
   req: LocalApiServerSpawnRequest,
   servers_service: &mut ApiServersService,
 ) -> ServiceResponse {
+  if req.dir.is_empty() {
+    let response = error_json_response("at least one dir entry is required")?;
+    return Ok(response);
+  }
+
   let server_args = ServerArguments {
     port: req.port.unwrap_or(DEFAULT_LOCAL_SERVER_PORT),
-    dir: req.dir,
+    dir: &req.dir,
     watch_dir: req.watch_dir.unwrap_or(false),
   };
 
@@ -35,11 +37,7 @@ pub fn spawn_local_server(
       Ok(response)
     }
     Err(err) => {
-      let body = serde_json::to_string(&ApiErr {
-        err_msg: format!("could not spawn a new api instance: {err}"),
-      })?;
-      let mut response = json_response(body);
-      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      let response = error_json_response(format!("could not spawn a new api instance: {err}"))?;
       Ok(response)
     }
   }
@@ -60,11 +58,7 @@ pub async fn stop_local_server(
       Ok(response)
     }
     Err(err) => {
-      let body = serde_json::to_string(&ApiErr {
-        err_msg: format!("could not stop api instance: {err}"),
-      })?;
-      let mut response = json_response(body);
-      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      let response = error_json_response(format!("could not stop api instance: {err}"))?;
       Ok(response)
     }
   }

@@ -1,4 +1,4 @@
-use hyper::{Response, StatusCode};
+use hyper::Response;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -7,10 +7,7 @@ use crate::{
     pkg::repository::PackagesRepository,
     releases::{Release, Version, fetch_remote_frontend_package_release, get_remote_release},
   },
-  server::{
-    api::ApiErr,
-    common::{ServiceResponse, empty_body, json_response},
-  },
+  server::common::{ServiceResponse, empty_body, error_json_response, json_response},
 };
 
 #[derive(Serialize)]
@@ -34,14 +31,7 @@ pub async fn check_latest_frontend_release(pkgs_repo: &PackagesRepository) -> Se
       let body = serde_json::to_string(&response_body).map_err(Box::new)?;
       json_response(body)
     }
-    Err(err) => {
-      let body = serde_json::to_string(&ApiErr {
-        err_msg: format!("could not fetch latest release: {err}"),
-      })?;
-      let mut response = json_response(body);
-      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-      response
-    }
+    Err(err) => error_json_response(format!("could not fetch latest release: {err}"))?,
   };
 
   Ok(response)
@@ -59,14 +49,10 @@ pub async fn update_frontend_package(
   let release = match get_remote_release(Version::Semver(req.version)).await {
     Ok(release) => release,
     Err(err) => {
-      let body = serde_json::to_string(&ApiErr {
-        err_msg: format!(
-          "could not fetch release info for version {}: {err}",
-          req.version
-        ),
-      })?;
-      let mut response = json_response(body);
-      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      let response = error_json_response(format!(
+        "could not fetch release info for version {}: {err}",
+        req.version
+      ))?;
       return Ok(response);
     }
   };
@@ -74,11 +60,10 @@ pub async fn update_frontend_package(
   let path = match fetch_remote_frontend_package_release(&release).await {
     Ok(path) => path,
     Err(err) => {
-      let body = serde_json::to_string(&ApiErr {
-        err_msg: format!("could not fetch the \"{}\" release: {err}", req.version),
-      })?;
-      let mut response = json_response(body);
-      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      let response = error_json_response(format!(
+        "could not fetch the \"{}\" release: {err}",
+        req.version
+      ))?;
       return Ok(response);
     }
   };
@@ -90,11 +75,10 @@ pub async fn update_frontend_package(
       Ok(response)
     }
     Err(err) => {
-      let body = serde_json::to_string(&ApiErr {
-        err_msg: format!("could not fetch the \"{}\" release: {err}", req.version),
-      })?;
-      let mut response = json_response(body);
-      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      let response = error_json_response(format!(
+        "could not fetch the \"{}\" release: {err}",
+        req.version
+      ))?;
       Ok(response)
     }
   }

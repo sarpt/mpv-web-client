@@ -23,9 +23,9 @@ const ADDR_ARG: &str = "--addr";
 const DIR_ARG: &str = "--dir";
 const WATCH_DIR_ARG: &str = "--watch-dir";
 
-pub struct ServerArguments {
+pub struct ServerArguments<'a> {
   pub port: u16,
-  pub dir: String,
+  pub dir: &'a [String],
   pub watch_dir: bool,
 }
 
@@ -37,12 +37,14 @@ impl ApiServersService {
   }
 
   pub fn spawn(&mut self, name: String, server_args: &ServerArguments) -> Result<(), String> {
-    let address = format!("{}:{}", LOCAL_SERVER_IP_ADDR, server_args.port);
     let mut cmd = Command::new(LOCAL_SERVER_BIN_NAME);
 
-    cmd
-      .args([ADDR_ARG, &address])
-      .args([DIR_ARG, &server_args.dir]);
+    let address = format!("{}:{}", LOCAL_SERVER_IP_ADDR, server_args.port);
+    cmd.args([ADDR_ARG, &address]);
+
+    for dir in server_args.dir {
+      cmd.args([DIR_ARG, dir]);
+    }
 
     if server_args.watch_dir {
       cmd.arg(WATCH_DIR_ARG);

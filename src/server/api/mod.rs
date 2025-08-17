@@ -5,6 +5,6 @@ pub mod frontend;
 pub mod management;
 
 #[derive(Serialize)]
-pub struct ApiErr {
-  err_msg: String,
+pub struct ApiErr<'a> {
+  pub err_msg: &'a str,
 }
