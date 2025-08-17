@@ -1,14 +1,11 @@
 use std::ops::Deref;
 
-use http_body_util::combinators::BoxBody;
-use hyper::{Response, body::Bytes};
+use hyper::Response;
 use tokio::sync::Notify;
 
-use crate::server::common::{ServiceError, empty_body};
+use crate::server::common::{ServiceResponse, empty_body};
 
-pub async fn trigger_shutdown<T>(
-  notifier: T,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
+pub async fn trigger_shutdown<T>(notifier: T) -> ServiceResponse
 where
   T: Deref<Target = Notify>,
 {

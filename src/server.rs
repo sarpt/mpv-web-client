@@ -3,8 +3,6 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::Duration;
 
-use http_body_util::combinators::BoxBody;
-use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -21,7 +19,7 @@ use crate::frontend::pkg::repository::PackagesRepository;
 use crate::server::api::api_servers::{get_all_instances, spawn_local_server, stop_local_server};
 use crate::server::api::frontend::{check_latest_frontend_release, update_frontend_package};
 use crate::server::api::management::trigger_shutdown;
-use crate::server::common::{ServiceError, empty_body, full_body};
+use crate::server::common::{ServiceResponse, empty_body, full_body};
 use crate::server::frontend::serve_frontend;
 use crate::server::router::get_route;
 
@@ -101,7 +99,7 @@ async fn service<T>(
   req: Request<hyper::body::Incoming>,
   shutdown_notifier: T,
   dependencies: Dependencies,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
+) -> ServiceResponse
 where
   T: Deref<Target = Notify>,
 {
@@ -120,20 +118,20 @@ where
         router::ApiRoutes::FrontendLatest => {
           check_latest_frontend_release(dependencies.packages_repository.lock().await.deref()).await
         }
-        router::ApiRoutes::FrontendUpdate(release) => {
+        router::ApiRoutes::FrontendUpdate(req_body) => {
           update_frontend_package(
-            release,
+            req_body,
             dependencies.packages_repository.lock().await.deref_mut(),
           )
           .await
         }
         router::ApiRoutes::Shutdown => trigger_shutdown(shutdown_notifier).await,
         router::ApiRoutes::ApiServers(api_servers_path) => match api_servers_path {
-          router::ApiServersRoutes::Spawn(name) => {
-            spawn_local_server(name, dependencies.api_service.lock().await.deref_mut())
+          router::ApiServersRoutes::Spawn(req_body) => {
+            spawn_local_server(req_body, dependencies.api_service.lock().await.deref_mut())
           }
-          router::ApiServersRoutes::Stop(name) => {
-            stop_local_server(name, dependencies.api_service.lock().await.deref_mut()).await
+          router::ApiServersRoutes::Stop(req_body) => {
+            stop_local_server(req_body, dependencies.api_service.lock().await.deref_mut()).await
           }
           router::ApiServersRoutes::All => {
             get_all_instances(dependencies.api_service.lock().await.deref_mut())

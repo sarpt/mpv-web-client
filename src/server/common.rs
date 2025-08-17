@@ -4,6 +4,7 @@ use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::{Response, body::Bytes, header::HeaderValue};
 
 pub type ServiceError = Box<dyn Error + Send + Sync>;
+pub type ServiceResponse = Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>;
 
 pub fn empty_body() -> BoxBody<Bytes, ServiceError> {
   Empty::<Bytes>::new()

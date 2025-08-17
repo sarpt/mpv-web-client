@@ -5,7 +5,7 @@ use futures::StreamExt;
 use http_body_util::StreamBody;
 use http_body_util::combinators::BoxBody;
 use hyper::Response;
-use hyper::body::{Bytes, Frame};
+use hyper::body::Frame;
 use hyper::header::HeaderValue;
 use log::debug;
 use mime_guess::Mime;
@@ -15,14 +15,14 @@ use tokio_util::io::ReaderStream;
 
 use crate::frontend::DEFAULT_ENTRYPOINT_FILE_NAME;
 use crate::frontend::pkg::repository::PackagesRepository;
-use crate::server::common::ServiceError;
+use crate::server::common::{ServiceError, ServiceResponse};
 
 const STREAM_CHUNK_SIZE: usize = 1024 * 1024 * 64;
 pub async fn serve_frontend(
   name: Option<&str>,
   encodings: Vec<String>,
   pkgs_repo: &PackagesRepository,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
+) -> ServiceResponse {
   let file_to_serve = match decide_file_to_serve(name, &encodings, pkgs_repo).await {
     Some(served_file_info) => served_file_info,
     None => {

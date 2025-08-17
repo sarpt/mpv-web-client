@@ -1,20 +1,24 @@
-use http_body_util::combinators::BoxBody;
-use hyper::{Response, StatusCode, body::Bytes};
-use serde::Serialize;
+use hyper::{Response, StatusCode};
+use serde::{Deserialize, Serialize};
 
 use crate::{
   api_servers::ApiServersService,
   server::{
     api::ApiErr,
-    common::{ServiceError, empty_body, json_response},
+    common::{ServiceResponse, empty_body, json_response},
   },
 };
 
-pub fn spawn_local_server(
+#[derive(Deserialize)]
+pub struct LocalApiServerSpawnRequest {
   name: String,
+}
+
+pub fn spawn_local_server(
+  req: LocalApiServerSpawnRequest,
   servers_service: &mut ApiServersService,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  match servers_service.spawn(name) {
+) -> ServiceResponse {
+  match servers_service.spawn(req.name) {
     Ok(()) => {
       let response = Response::new(empty_body());
       Ok(response)
@@ -30,11 +34,16 @@ pub fn spawn_local_server(
   }
 }
 
-pub async fn stop_local_server(
+#[derive(Deserialize)]
+pub struct LocalApiServerStopRequest {
   name: String,
+}
+
+pub async fn stop_local_server(
+  req: LocalApiServerStopRequest,
   servers_service: &mut ApiServersService,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  match servers_service.stop(name).await {
+) -> ServiceResponse {
+  match servers_service.stop(req.name).await {
     Ok(()) => {
       let response = Response::new(empty_body());
       Ok(response)
@@ -62,9 +71,7 @@ pub struct ApiInstancesResponse<'a> {
   instances: &'a [ApiServerInstance<'a>],
 }
 
-pub fn get_all_instances(
-  servers_service: &mut ApiServersService,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
+pub fn get_all_instances(servers_service: &mut ApiServersService) -> ServiceResponse {
   let instances: Vec<ApiServerInstance> = servers_service
     .server_instances()
     .map(|(name, inst)| ApiServerInstance {

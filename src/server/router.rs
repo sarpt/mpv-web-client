@@ -3,7 +3,10 @@ use hyper::{Method, Request, body::Incoming};
 use route_recognizer::Router;
 use serde::Deserialize;
 
-use crate::common::semver::Semver;
+use crate::server::api::{
+  api_servers::{LocalApiServerSpawnRequest, LocalApiServerStopRequest},
+  frontend::FrontendUpdateRequest,
+};
 
 enum PathRoutes {
   Frontend,
@@ -30,15 +33,15 @@ pub enum Routes {
 
 pub enum ApiRoutes {
   FrontendLatest,
-  FrontendUpdate(Semver),
+  FrontendUpdate(FrontendUpdateRequest),
   Shutdown,
   ApiServers(ApiServersRoutes),
 }
 
 pub enum ApiServersRoutes {
-  Spawn(String),
+  Spawn(LocalApiServerSpawnRequest),
   All,
-  Stop(String),
+  Stop(LocalApiServerStopRequest),
 }
 
 pub enum RoutingErr {
@@ -93,9 +96,9 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
             return Err(RoutingErr::InvalidMethod);
           }
 
-          let body = parse_request_body::<LocalApiServerSpawnRequest>(req).await?;
+          let req_body = parse_request_body::<LocalApiServerSpawnRequest>(req).await?;
           Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::Spawn(
-            body.name,
+            req_body,
           ))))
         }
         ApiServersPathRoutes::Stop => {
@@ -103,9 +106,9 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
             return Err(RoutingErr::InvalidMethod);
           }
 
-          let body = parse_request_body::<LocalApiServerStopRequest>(req).await?;
+          let req_body = parse_request_body::<LocalApiServerStopRequest>(req).await?;
           Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::Stop(
-            body.name,
+            req_body,
           ))))
         }
         ApiServersPathRoutes::All => Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::All))),
@@ -117,26 +120,11 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
           return Err(RoutingErr::InvalidMethod);
         }
 
-        let body = parse_request_body::<FrontendUpdateRequest>(req).await?;
-        Ok(Routes::Api(ApiRoutes::FrontendUpdate(body.version)))
+        let req_body = parse_request_body::<FrontendUpdateRequest>(req).await?;
+        Ok(Routes::Api(ApiRoutes::FrontendUpdate(req_body)))
       }
     },
   }
-}
-
-#[derive(Deserialize)]
-struct FrontendUpdateRequest {
-  version: Semver,
-}
-
-#[derive(Deserialize)]
-struct LocalApiServerSpawnRequest {
-  name: String,
-}
-
-#[derive(Deserialize)]
-struct LocalApiServerStopRequest {
-  name: String,
 }
 
 async fn parse_request_body<T>(req: Request<Incoming>) -> Result<T, RoutingErr>
