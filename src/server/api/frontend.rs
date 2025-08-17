@@ -1,29 +1,24 @@
-use std::ops::Deref;
-
 use http_body_util::combinators::BoxBody;
-use hyper::body::Bytes;
-use hyper::{Response, StatusCode};
+use hyper::{Response, StatusCode, body::Bytes};
 use serde::Serialize;
-use tokio::sync::Notify;
 
-use crate::api::ApiServersService;
-use crate::common::semver::Semver;
-use crate::frontend::pkg::repository::PackagesRepository;
-use crate::frontend::releases::{
-  Release, Version, fetch_remote_frontend_package_release, get_remote_release,
+use crate::{
+  common::semver::Semver,
+  frontend::{
+    pkg::repository::PackagesRepository,
+    releases::{Release, Version, fetch_remote_frontend_package_release, get_remote_release},
+  },
+  server::{
+    api::ApiErr,
+    common::{ServiceError, empty_body, json_response},
+  },
 };
-use crate::server::common::{ServiceError, empty_body, json_response};
 
 #[derive(Serialize)]
-struct CheckLatestResponseBody {
+pub struct CheckLatestResponseBody {
   latest_release: Release,
   local_version: Option<Semver>,
   should_update: bool,
-}
-
-#[derive(Serialize)]
-struct ApiErr {
-  err_msg: String,
 }
 
 pub async fn check_latest_frontend_release(
@@ -98,85 +93,4 @@ pub async fn update_frontend_package(
       Ok(response)
     }
   }
-}
-
-pub async fn trigger_shutdown<T>(
-  notifier: T,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError>
-where
-  T: Deref<Target = Notify>,
-{
-  notifier.notify_waiters();
-  let response = Response::new(empty_body());
-  Ok(response)
-}
-
-pub fn spawn_local_server(
-  name: String,
-  servers_service: &mut ApiServersService,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  match servers_service.spawn(name) {
-    Ok(()) => {
-      let response = Response::new(empty_body());
-      Ok(response)
-    }
-    Err(err) => {
-      let body = serde_json::to_string(&ApiErr {
-        err_msg: format!("could not spawn a new api instance: {err}"),
-      })?;
-      let mut response = json_response(body);
-      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-      Ok(response)
-    }
-  }
-}
-
-pub async fn stop_local_server(
-  name: String,
-  servers_service: &mut ApiServersService,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  match servers_service.stop(name).await {
-    Ok(()) => {
-      let response = Response::new(empty_body());
-      Ok(response)
-    }
-    Err(err) => {
-      let body = serde_json::to_string(&ApiErr {
-        err_msg: format!("could not stop api instance: {err}"),
-      })?;
-      let mut response = json_response(body);
-      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-      Ok(response)
-    }
-  }
-}
-
-pub fn get_all_instances(
-  servers_service: &mut ApiServersService,
-) -> Result<Response<BoxBody<Bytes, ServiceError>>, ServiceError> {
-  let instances: Vec<ApiServerInstance> = servers_service
-    .server_instances()
-    .map(|(name, inst)| ApiServerInstance {
-      local: inst.local,
-      address: &inst.address,
-      name,
-    })
-    .collect();
-  let body = serde_json::to_string(&ApiInstancesResponse {
-    instances: &instances,
-  })?;
-  let response = json_response(body);
-  Ok(response)
-}
-
-#[derive(Serialize)]
-struct ApiServerInstance<'a> {
-  pub local: bool,
-  pub address: &'a str,
-  pub name: &'a str,
-}
-
-#[derive(Serialize)]
-struct ApiInstancesResponse<'a> {
-  instances: &'a [ApiServerInstance<'a>],
 }

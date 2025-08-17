@@ -16,12 +16,11 @@ use tokio::select;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::sleep;
 
-use crate::api::ApiServersService;
+use crate::api_servers::ApiServersService;
 use crate::frontend::pkg::repository::PackagesRepository;
-use crate::server::api::{
-  check_latest_frontend_release, get_all_instances, spawn_local_server, stop_local_server,
-  trigger_shutdown, update_frontend_package,
-};
+use crate::server::api::api_servers::{get_all_instances, spawn_local_server, stop_local_server};
+use crate::server::api::frontend::{check_latest_frontend_release, update_frontend_package};
+use crate::server::api::management::trigger_shutdown;
 use crate::server::common::{ServiceError, empty_body, full_body};
 use crate::server::frontend::serve_frontend;
 use crate::server::router::get_route;

@@ -8,14 +8,14 @@ use std::{
 use tokio::{net::TcpListener, sync::Mutex};
 
 use crate::{
-  api::ApiServersService,
+  api_servers::ApiServersService,
   frontend::{init_frontend, pkg::repository::PackagesRepository},
   project_paths::ensure_project_dirs,
   server::serve,
 };
 use std::net::SocketAddr;
 
-mod api;
+mod api_servers;
 mod common;
 mod frontend;
 mod project_paths;
