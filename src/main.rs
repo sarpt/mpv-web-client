@@ -8,12 +8,14 @@ use std::{
 use tokio::{net::TcpListener, sync::Mutex};
 
 use crate::{
+  api_servers::ApiServersService,
   frontend::{init_frontend, pkg::repository::PackagesRepository},
   project_paths::ensure_project_dirs,
   server::serve,
 };
 use std::net::SocketAddr;
 
+mod api_servers;
 mod common;
 mod frontend;
 mod project_paths;
@@ -105,6 +107,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
   info!("version {VERSION}");
 
   ensure_project_dirs()?;
+  let api_service = ApiServersService::new();
   let mut packages_repository = PackagesRepository::new();
   init_frontend(
     args.pkg.clone(),
@@ -129,6 +132,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .map_err(|err| *Box::new(err))?;
   let server_dependencies = server::Dependencies {
     packages_repository: Arc::new(Mutex::new(packages_repository)),
+    api_service: Arc::new(Mutex::new(api_service)),
   };
 
   if let Err(err) = serve(tcp_listener, idle_shutdown_interval, server_dependencies).await {
