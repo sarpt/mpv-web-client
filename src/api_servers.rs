@@ -1,11 +1,21 @@
-use std::collections::{HashMap, hash_map::Iter};
+use std::{
+  collections::{HashMap, hash_map::Iter},
+  path::PathBuf,
+  process::Stdio,
+};
 
-use log::info;
+use futures::future::join;
+use log::{error, info};
 use nix::{
   sys::signal::{self, Signal},
   unistd::Pid,
 };
-use tokio::process::{Child, Command};
+use tokio::{
+  fs::OpenOptions,
+  io::BufWriter,
+  process::{Child, Command},
+  spawn,
+};
 
 pub struct ApiServerInstance {
   pub local: bool,
@@ -15,6 +25,7 @@ pub struct ApiServerInstance {
 
 pub struct ApiServersService {
   instances: HashMap<String, ApiServerInstance>,
+  project_dir: PathBuf,
 }
 
 const LOCAL_SERVER_IP_ADDR: &str = "127.0.0.1";
@@ -30,9 +41,10 @@ pub struct ServerArguments<'a> {
 }
 
 impl ApiServersService {
-  pub fn new() -> Self {
+  pub fn new(project_dir: PathBuf) -> Self {
     ApiServersService {
       instances: HashMap::new(),
+      project_dir,
     }
   }
 
@@ -50,15 +62,65 @@ impl ApiServersService {
       cmd.arg(WATCH_DIR_ARG);
     }
 
-    let handle = cmd
+    let mut handle = cmd
+      .stdout(Stdio::piped())
+      .stderr(Stdio::piped())
       .spawn()
       .map_err(|err| format!("could not spawn an api instance on address {address}: {err}"))?;
 
+    let mut stdout = handle.stdout.take().unwrap();
+    let mut stderr = handle.stderr.take().unwrap();
     let instance = ApiServerInstance {
       local: true,
       address,
       handle,
     };
+
+    let mut stdout_path = self.project_dir.clone();
+    stdout_path.push("stdout");
+    let mut stderr_path = self.project_dir.clone();
+    stderr_path.push("stderr");
+
+    spawn(async move {
+      let target_file_stdout = match OpenOptions::default()
+        .create(true)
+        .read(false)
+        .write(true)
+        .open(&stdout_path)
+        .await
+      {
+        Ok(val) => val,
+        Err(err) => {
+          error!(
+            "could not open file for stdout writing {}: {err}",
+            &stdout_path.to_string_lossy()
+          );
+          return;
+        }
+      };
+      let target_file_stderr = match OpenOptions::default()
+        .create(true)
+        .read(false)
+        .write(true)
+        .open(&stderr_path)
+        .await
+      {
+        Ok(val) => val,
+        Err(err) => {
+          error!(
+            "could not open file for stderr writing {}: {err}",
+            &stderr_path.to_string_lossy()
+          );
+          return;
+        }
+      };
+      let mut stdout_file_writer = BufWriter::new(target_file_stdout);
+      let mut stderr_file_writer = BufWriter::new(target_file_stderr);
+      let stdout_fut = tokio::io::copy(&mut stdout, &mut stdout_file_writer);
+      let stderr_fut = tokio::io::copy(&mut stderr, &mut stderr_file_writer);
+
+      _ = join(stdout_fut, stderr_fut).await;
+    });
 
     self.instances.insert(name, instance);
 

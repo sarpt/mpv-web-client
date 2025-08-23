@@ -106,8 +106,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
   init_logging()?;
   info!("version {VERSION}");
 
-  ensure_project_dirs()?;
-  let api_service = ApiServersService::new();
+  let project_dirs = ensure_project_dirs()?;
+  let api_service = ApiServersService::new(project_dirs.project_dir);
   let mut packages_repository = PackagesRepository::new();
   init_frontend(
     args.pkg.clone(),

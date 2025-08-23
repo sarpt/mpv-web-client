@@ -35,12 +35,22 @@ pub fn get_temp_dir() -> PathBuf {
   path
 }
 
-pub fn ensure_project_dirs() -> Result<(), std::io::Error> {
+pub struct ProjectDirs {
+  pub temp_dir: PathBuf,
+  pub project_dir: PathBuf,
+}
+
+pub fn ensure_project_dirs() -> Result<ProjectDirs, std::io::Error> {
   let temp_dir = get_temp_dir();
-  create_dir_all(temp_dir)?;
+  create_dir_all(&temp_dir)?;
 
   let project_dir = get_project_home_dir()?;
-  create_dir_all(project_dir)
+  create_dir_all(&project_dir)?;
+
+  Ok(ProjectDirs {
+    temp_dir,
+    project_dir,
+  })
 }
 
 pub fn get_frontend_temp_dir() -> PathBuf {
