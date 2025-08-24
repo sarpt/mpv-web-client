@@ -5,13 +5,13 @@ use std::{
 };
 
 use futures::future::join;
-use log::{error, info};
+use log::info;
 use nix::{
   sys::signal::{self, Signal},
   unistd::Pid,
 };
 use tokio::{
-  fs::OpenOptions,
+  fs::{File, OpenOptions},
   io::BufWriter,
   process::{Child, Command},
   spawn,
@@ -48,7 +48,11 @@ impl ApiServersService {
     }
   }
 
-  pub fn spawn(&mut self, name: String, server_args: &ServerArguments) -> Result<(), String> {
+  pub async fn spawn<'a>(
+    &mut self,
+    name: String,
+    server_args: &ServerArguments<'a>,
+  ) -> Result<(), String> {
     let mut cmd = Command::new(LOCAL_SERVER_BIN_NAME);
 
     let address = format!("{}:{}", LOCAL_SERVER_IP_ADDR, server_args.port);
@@ -70,58 +74,25 @@ impl ApiServersService {
 
     let mut stdout = handle.stdout.take().unwrap();
     let mut stderr = handle.stderr.take().unwrap();
-    let instance = ApiServerInstance {
-      local: true,
-      address,
-      handle,
-    };
 
-    let mut stdout_path = self.project_dir.clone();
-    stdout_path.push("stdout");
-    let mut stderr_path = self.project_dir.clone();
-    stderr_path.push("stderr");
-
+    let mut stdout_file_writer = self
+      .get_stream_file_writer(&format!("mwa_{}_{}_stdout", &name, server_args.port))
+      .await?;
+    let mut stderr_file_writer = self
+      .get_stream_file_writer(&format!("mwa_{}_{}_stderr", &name, server_args.port))
+      .await?;
     spawn(async move {
-      let target_file_stdout = match OpenOptions::default()
-        .create(true)
-        .read(false)
-        .write(true)
-        .open(&stdout_path)
-        .await
-      {
-        Ok(val) => val,
-        Err(err) => {
-          error!(
-            "could not open file for stdout writing {}: {err}",
-            &stdout_path.to_string_lossy()
-          );
-          return;
-        }
-      };
-      let target_file_stderr = match OpenOptions::default()
-        .create(true)
-        .read(false)
-        .write(true)
-        .open(&stderr_path)
-        .await
-      {
-        Ok(val) => val,
-        Err(err) => {
-          error!(
-            "could not open file for stderr writing {}: {err}",
-            &stderr_path.to_string_lossy()
-          );
-          return;
-        }
-      };
-      let mut stdout_file_writer = BufWriter::new(target_file_stdout);
-      let mut stderr_file_writer = BufWriter::new(target_file_stderr);
       let stdout_fut = tokio::io::copy(&mut stdout, &mut stdout_file_writer);
       let stderr_fut = tokio::io::copy(&mut stderr, &mut stderr_file_writer);
 
       _ = join(stdout_fut, stderr_fut).await;
     });
 
+    let instance = ApiServerInstance {
+      local: true,
+      address,
+      handle,
+    };
     self.instances.insert(name, instance);
 
     Ok(())
@@ -148,5 +119,25 @@ impl ApiServersService {
       .map_err(|err| format!("could not await on instance closure: {err}"))?;
     info!("instance pid: {id}; name: {name} closed with result: {result}");
     Ok(())
+  }
+
+  async fn get_stream_file_writer(&self, filename: &str) -> Result<BufWriter<File>, String> {
+    let mut path = self.project_dir.clone();
+    path.push(filename);
+
+    let target_file = OpenOptions::default()
+      .create(true)
+      .read(false)
+      .write(true)
+      .open(&path)
+      .await
+      .map_err(|err| {
+        format!(
+          "could not open file for stdout writing {}: {err}",
+          &path.to_string_lossy()
+        )
+      })?;
+
+    Ok(BufWriter::new(target_file))
   }
 }

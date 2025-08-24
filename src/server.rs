@@ -128,7 +128,7 @@ where
         router::ApiRoutes::Shutdown => trigger_shutdown(shutdown_notifier).await,
         router::ApiRoutes::ApiServers(api_servers_path) => match api_servers_path {
           router::ApiServersRoutes::Spawn(req_body) => {
-            spawn_local_server(req_body, dependencies.api_service.lock().await.deref_mut())
+            spawn_local_server(req_body, dependencies.api_service.lock().await.deref_mut()).await
           }
           router::ApiServersRoutes::Stop(req_body) => {
             stop_local_server(req_body, dependencies.api_service.lock().await.deref_mut()).await
