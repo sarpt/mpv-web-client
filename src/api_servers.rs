@@ -1,10 +1,11 @@
 use std::{
   collections::{HashMap, hash_map::Iter},
+  mem::take,
   path::PathBuf,
   process::Stdio,
 };
 
-use futures::future::join;
+use futures::future::{join, join_all};
 use log::info;
 use nix::{
   sys::signal::{self, Signal},
@@ -15,6 +16,7 @@ use tokio::{
   io::BufWriter,
   process::{Child, Command},
   spawn,
+  task::JoinHandle,
 };
 
 pub struct ApiServerInstance {
@@ -26,6 +28,7 @@ pub struct ApiServerInstance {
 pub struct ApiServersService {
   instances: HashMap<String, ApiServerInstance>,
   project_dir: PathBuf,
+  logs_join_handles: Vec<JoinHandle<()>>,
 }
 
 const LOCAL_SERVER_IP_ADDR: &str = "127.0.0.1";
@@ -45,6 +48,7 @@ impl ApiServersService {
     ApiServersService {
       instances: HashMap::new(),
       project_dir,
+      logs_join_handles: Vec::new(),
     }
   }
 
@@ -81,12 +85,13 @@ impl ApiServersService {
     let mut stderr_file_writer = self
       .get_stream_file_writer(&format!("mwa_{}_{}_stderr", &name, server_args.port))
       .await?;
-    spawn(async move {
+    let join_handle = spawn(async move {
       let stdout_fut = tokio::io::copy(&mut stdout, &mut stdout_file_writer);
       let stderr_fut = tokio::io::copy(&mut stderr, &mut stderr_file_writer);
 
       _ = join(stdout_fut, stderr_fut).await;
     });
+    self.logs_join_handles.push(join_handle);
 
     let instance = ApiServerInstance {
       local: true,
@@ -100,6 +105,10 @@ impl ApiServersService {
 
   pub fn server_instances(&'_ self) -> Iter<'_, String, ApiServerInstance> {
     self.instances.iter()
+  }
+
+  pub async fn shutdown(&mut self) {
+    join_all(take(&mut self.logs_join_handles)).await;
   }
 
   pub async fn stop(&mut self, name: String) -> Result<(), String> {

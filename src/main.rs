@@ -1,6 +1,7 @@
 use clap::Parser;
 use log::{error, info, warn};
 use nix::{errno::Errno, ifaddrs::getifaddrs};
+use std::ops::DerefMut;
 use std::{
   error::Error, fmt::Display, io::ErrorKind, net::Ipv4Addr, ops::RangeInclusive, path::PathBuf,
   sync::Arc, time::SystemTime,
@@ -135,10 +136,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     api_service: Arc::new(Mutex::new(api_service)),
   };
 
-  if let Err(err) = serve(tcp_listener, idle_shutdown_interval, server_dependencies).await {
+  if let Err(err) = serve(tcp_listener, idle_shutdown_interval, &server_dependencies).await {
     error!("error encountered while serving frontend: {err}");
     return Err(err);
   }
+
+  server_dependencies
+    .api_service
+    .lock()
+    .await
+    .deref_mut()
+    .shutdown()
+    .await;
 
   Ok(())
 }

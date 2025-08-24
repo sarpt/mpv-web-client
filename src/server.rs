@@ -38,7 +38,7 @@ pub struct Dependencies {
 pub async fn serve(
   listener: TcpListener,
   idle_shutdown_timeout: Option<u32>,
-  dependencies: Dependencies,
+  dependencies: &Dependencies,
 ) -> Result<(), Box<dyn Error>> {
   let graceful = graceful::GracefulShutdown::new();
   let main_service_shutdown_notifier = Arc::new(Notify::new());
