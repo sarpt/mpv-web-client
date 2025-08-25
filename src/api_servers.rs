@@ -1,11 +1,25 @@
-use std::collections::{HashMap, hash_map::Iter};
+use std::{
+  collections::{HashMap, hash_map::Iter},
+  mem::take,
+  path::PathBuf,
+  process::Stdio,
+  time::Duration,
+};
 
-use log::info;
+use futures::future::{join, join_all};
+use log::{debug, info, warn};
 use nix::{
   sys::signal::{self, Signal},
   unistd::Pid,
 };
-use tokio::process::{Child, Command};
+use tokio::{
+  fs::{File, OpenOptions},
+  io::BufWriter,
+  process::{Child, Command},
+  select, spawn,
+  task::JoinHandle,
+  time::sleep,
+};
 
 pub struct ApiServerInstance {
   pub local: bool,
@@ -15,6 +29,8 @@ pub struct ApiServerInstance {
 
 pub struct ApiServersService {
   instances: HashMap<String, ApiServerInstance>,
+  logs_dir: PathBuf,
+  logs_join_handles: Vec<JoinHandle<()>>,
 }
 
 const LOCAL_SERVER_IP_ADDR: &str = "127.0.0.1";
@@ -30,13 +46,19 @@ pub struct ServerArguments<'a> {
 }
 
 impl ApiServersService {
-  pub fn new() -> Self {
+  pub fn new(logs_dir: PathBuf) -> Self {
     ApiServersService {
       instances: HashMap::new(),
+      logs_dir,
+      logs_join_handles: Vec::new(),
     }
   }
 
-  pub fn spawn(&mut self, name: String, server_args: &ServerArguments) -> Result<(), String> {
+  pub async fn spawn<'a>(
+    &mut self,
+    name: String,
+    server_args: &ServerArguments<'a>,
+  ) -> Result<(), String> {
     let mut cmd = Command::new(LOCAL_SERVER_BIN_NAME);
 
     let address = format!("{}:{}", LOCAL_SERVER_IP_ADDR, server_args.port);
@@ -50,16 +72,34 @@ impl ApiServersService {
       cmd.arg(WATCH_DIR_ARG);
     }
 
-    let handle = cmd
+    let mut handle = cmd
+      .stdout(Stdio::piped())
+      .stderr(Stdio::piped())
       .spawn()
       .map_err(|err| format!("could not spawn an api instance on address {address}: {err}"))?;
+
+    let mut stdout = handle.stdout.take().unwrap();
+    let mut stderr = handle.stderr.take().unwrap();
+
+    let mut stdout_file_writer = self
+      .get_stream_file_writer(&format!("mwa_{}_{}_stdout", &name, server_args.port))
+      .await?;
+    let mut stderr_file_writer = self
+      .get_stream_file_writer(&format!("mwa_{}_{}_stderr", &name, server_args.port))
+      .await?;
+    let join_handle = spawn(async move {
+      let stdout_fut = tokio::io::copy(&mut stdout, &mut stdout_file_writer);
+      let stderr_fut = tokio::io::copy(&mut stderr, &mut stderr_file_writer);
+
+      _ = join(stdout_fut, stderr_fut).await;
+    });
+    self.logs_join_handles.push(join_handle);
 
     let instance = ApiServerInstance {
       local: true,
       address,
       handle,
     };
-
     self.instances.insert(name, instance);
 
     Ok(())
@@ -67,6 +107,17 @@ impl ApiServersService {
 
   pub fn server_instances(&'_ self) -> Iter<'_, String, ApiServerInstance> {
     self.instances.iter()
+  }
+
+  pub async fn shutdown(&mut self, shutdown_timeout: u32) {
+    select! {
+      _ = join_all(take(&mut self.logs_join_handles)) => {
+        debug!("finished writing all streams from api servers")
+      },
+      _ = sleep(Duration::from_secs(shutdown_timeout.into())) => {
+        warn!("forcing shutdown due to waiting for all streams took longer than {shutdown_timeout} seconds")
+      }
+    }
   }
 
   pub async fn stop(&mut self, name: String) -> Result<(), String> {
@@ -86,5 +137,25 @@ impl ApiServersService {
       .map_err(|err| format!("could not await on instance closure: {err}"))?;
     info!("instance pid: {id}; name: {name} closed with result: {result}");
     Ok(())
+  }
+
+  async fn get_stream_file_writer(&self, filename: &str) -> Result<BufWriter<File>, String> {
+    let mut path = self.logs_dir.clone();
+    path.push(filename);
+
+    let target_file = OpenOptions::default()
+      .create(true)
+      .read(false)
+      .write(true)
+      .open(&path)
+      .await
+      .map_err(|err| {
+        format!(
+          "could not open file for stdout writing {}: {err}",
+          &path.to_string_lossy()
+        )
+      })?;
+
+    Ok(BufWriter::new(target_file))
   }
 }

@@ -38,7 +38,7 @@ pub struct Dependencies {
 pub async fn serve(
   listener: TcpListener,
   idle_shutdown_timeout: Option<u32>,
-  dependencies: Dependencies,
+  dependencies: &Dependencies,
 ) -> Result<(), Box<dyn Error>> {
   let graceful = graceful::GracefulShutdown::new();
   let main_service_shutdown_notifier = Arc::new(Notify::new());
@@ -128,7 +128,7 @@ where
         router::ApiRoutes::Shutdown => trigger_shutdown(shutdown_notifier).await,
         router::ApiRoutes::ApiServers(api_servers_path) => match api_servers_path {
           router::ApiServersRoutes::Spawn(req_body) => {
-            spawn_local_server(req_body, dependencies.api_service.lock().await.deref_mut())
+            spawn_local_server(req_body, dependencies.api_service.lock().await.deref_mut()).await
           }
           router::ApiServersRoutes::Stop(req_body) => {
             stop_local_server(req_body, dependencies.api_service.lock().await.deref_mut()).await

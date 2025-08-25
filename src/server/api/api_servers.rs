@@ -16,7 +16,7 @@ pub struct LocalApiServerSpawnRequest {
 
 const DEFAULT_LOCAL_SERVER_PORT: u16 = 3001;
 
-pub fn spawn_local_server(
+pub async fn spawn_local_server(
   req: LocalApiServerSpawnRequest,
   servers_service: &mut ApiServersService,
 ) -> ServiceResponse {
@@ -31,7 +31,7 @@ pub fn spawn_local_server(
     watch_dir: req.watch_dir.unwrap_or(false),
   };
 
-  match servers_service.spawn(req.name, &server_args) {
+  match servers_service.spawn(req.name, &server_args).await {
     Ok(()) => {
       let response = Response::new(empty_body());
       Ok(response)

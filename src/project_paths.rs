@@ -28,6 +28,14 @@ pub fn get_frontend_dir() -> Result<PathBuf, std::io::Error> {
   Ok(home_dir)
 }
 
+const LOGS_DIR: &str = "logs";
+pub fn get_logs_dir() -> Result<PathBuf, std::io::Error> {
+  let mut home_dir = get_project_home_dir()?;
+  home_dir.push(LOGS_DIR);
+
+  Ok(home_dir)
+}
+
 pub fn get_temp_dir() -> PathBuf {
   let mut path = env::temp_dir();
   path.push(PROJECT_SUBDIR);
@@ -35,12 +43,27 @@ pub fn get_temp_dir() -> PathBuf {
   path
 }
 
-pub fn ensure_project_dirs() -> Result<(), std::io::Error> {
+pub struct ProjectDirs {
+  pub logs_dir: PathBuf,
+  pub temp_dir: PathBuf,
+  pub project_dir: PathBuf,
+}
+
+pub fn ensure_project_dirs() -> Result<ProjectDirs, std::io::Error> {
   let temp_dir = get_temp_dir();
-  create_dir_all(temp_dir)?;
+  create_dir_all(&temp_dir)?;
 
   let project_dir = get_project_home_dir()?;
-  create_dir_all(project_dir)
+  create_dir_all(&project_dir)?;
+
+  let logs_dir = get_logs_dir()?;
+  create_dir_all(&logs_dir)?;
+
+  Ok(ProjectDirs {
+    temp_dir,
+    project_dir,
+    logs_dir,
+  })
 }
 
 pub fn get_frontend_temp_dir() -> PathBuf {

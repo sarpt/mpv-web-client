@@ -1,6 +1,7 @@
 use clap::Parser;
 use log::{error, info, warn};
 use nix::{errno::Errno, ifaddrs::getifaddrs};
+use std::ops::DerefMut;
 use std::{
   error::Error, fmt::Display, io::ErrorKind, net::Ipv4Addr, ops::RangeInclusive, path::PathBuf,
   sync::Arc, time::SystemTime,
@@ -26,6 +27,7 @@ const PORT_RANGE: RangeInclusive<u16> = 7000..=9000;
 const DEFAULT_SOCKET_RETRIES: u8 = 8;
 const DEFAULT_IDLE_SHUTDOWN_TIMEOUT: u8 = 60;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const API_SERVICE_SHUTDOWN_TIMEOUT: u8 = 30;
 
 #[derive(Parser, Debug)]
 #[command(version = VERSION, about = "client for mpv-web-api and mpv-web-front server", long_about = None)]
@@ -106,8 +108,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
   init_logging()?;
   info!("version {VERSION}");
 
-  ensure_project_dirs()?;
-  let api_service = ApiServersService::new();
+  let project_dirs = ensure_project_dirs()?;
+  let api_service = ApiServersService::new(project_dirs.logs_dir);
   let mut packages_repository = PackagesRepository::new();
   init_frontend(
     args.pkg.clone(),
@@ -135,10 +137,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     api_service: Arc::new(Mutex::new(api_service)),
   };
 
-  if let Err(err) = serve(tcp_listener, idle_shutdown_interval, server_dependencies).await {
+  if let Err(err) = serve(tcp_listener, idle_shutdown_interval, &server_dependencies).await {
     error!("error encountered while serving frontend: {err}");
     return Err(err);
   }
+
+  server_dependencies
+    .api_service
+    .lock()
+    .await
+    .deref_mut()
+    .shutdown(API_SERVICE_SHUTDOWN_TIMEOUT.into())
+    .await;
 
   Ok(())
 }
