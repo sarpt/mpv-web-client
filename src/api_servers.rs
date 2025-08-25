@@ -3,10 +3,11 @@ use std::{
   mem::take,
   path::PathBuf,
   process::Stdio,
+  time::Duration,
 };
 
 use futures::future::{join, join_all};
-use log::info;
+use log::{debug, info, warn};
 use nix::{
   sys::signal::{self, Signal},
   unistd::Pid,
@@ -15,8 +16,9 @@ use tokio::{
   fs::{File, OpenOptions},
   io::BufWriter,
   process::{Child, Command},
-  spawn,
+  select, spawn,
   task::JoinHandle,
+  time::sleep,
 };
 
 pub struct ApiServerInstance {
@@ -107,8 +109,15 @@ impl ApiServersService {
     self.instances.iter()
   }
 
-  pub async fn shutdown(&mut self) {
-    join_all(take(&mut self.logs_join_handles)).await;
+  pub async fn shutdown(&mut self, shutdown_timeout: u32) {
+    select! {
+      _ = join_all(take(&mut self.logs_join_handles)) => {
+        debug!("finished writing all streams from api servers")
+      },
+      _ = sleep(Duration::from_secs(shutdown_timeout.into())) => {
+        warn!("forcing shutdown due to waiting for all streams took longer than {shutdown_timeout} seconds")
+      }
+    }
   }
 
   pub async fn stop(&mut self, name: String) -> Result<(), String> {

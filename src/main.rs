@@ -27,6 +27,7 @@ const PORT_RANGE: RangeInclusive<u16> = 7000..=9000;
 const DEFAULT_SOCKET_RETRIES: u8 = 8;
 const DEFAULT_IDLE_SHUTDOWN_TIMEOUT: u8 = 60;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const API_SERVICE_SHUTDOWN_TIMEOUT: u8 = 30;
 
 #[derive(Parser, Debug)]
 #[command(version = VERSION, about = "client for mpv-web-api and mpv-web-front server", long_about = None)]
@@ -146,7 +147,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .lock()
     .await
     .deref_mut()
-    .shutdown()
+    .shutdown(API_SERVICE_SHUTDOWN_TIMEOUT.into())
     .await;
 
   Ok(())
