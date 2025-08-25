@@ -27,7 +27,7 @@ pub struct ApiServerInstance {
 
 pub struct ApiServersService {
   instances: HashMap<String, ApiServerInstance>,
-  project_dir: PathBuf,
+  logs_dir: PathBuf,
   logs_join_handles: Vec<JoinHandle<()>>,
 }
 
@@ -44,10 +44,10 @@ pub struct ServerArguments<'a> {
 }
 
 impl ApiServersService {
-  pub fn new(project_dir: PathBuf) -> Self {
+  pub fn new(logs_dir: PathBuf) -> Self {
     ApiServersService {
       instances: HashMap::new(),
-      project_dir,
+      logs_dir,
       logs_join_handles: Vec::new(),
     }
   }
@@ -131,7 +131,7 @@ impl ApiServersService {
   }
 
   async fn get_stream_file_writer(&self, filename: &str) -> Result<BufWriter<File>, String> {
-    let mut path = self.project_dir.clone();
+    let mut path = self.logs_dir.clone();
     path.push(filename);
 
     let target_file = OpenOptions::default()
