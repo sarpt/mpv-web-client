@@ -4,7 +4,7 @@ use route_recognizer::Router;
 use serde::Deserialize;
 
 use crate::server::api::{
-  api_servers::{LocalApiServerSpawnRequest, LocalApiServerStopRequest},
+  api_servers::{LocalApiServerLogsRequest, LocalApiServerSpawnRequest, LocalApiServerStopRequest},
   frontend::FrontendUpdateRequest,
 };
 
@@ -24,6 +24,7 @@ enum ApiServersPathRoutes {
   Spawn,
   All,
   Stop,
+  Logs,
 }
 
 pub enum Routes {
@@ -42,6 +43,7 @@ pub enum ApiServersRoutes {
   Spawn(LocalApiServerSpawnRequest),
   All,
   Stop(LocalApiServerStopRequest),
+  Logs(LocalApiServerLogsRequest),
 }
 
 pub enum RoutingErr {
@@ -60,6 +62,10 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
   router.add(
     "/api/frontend/update",
     PathRoutes::Api(ApiPathRoutes::FrontendUpdate),
+  );
+  router.add(
+    "/api/servers/logs",
+    PathRoutes::Api(ApiPathRoutes::ApiServers(ApiServersPathRoutes::Logs)),
   );
   router.add(
     "/api/servers/spawn",
@@ -112,6 +118,16 @@ pub async fn get_route(req: Request<hyper::body::Incoming>) -> Result<Routes, Ro
           ))))
         }
         ApiServersPathRoutes::All => Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::All))),
+        ApiServersPathRoutes::Logs => {
+          if req.method() != Method::GET {
+            return Err(RoutingErr::InvalidMethod);
+          }
+
+          let req_body = parse_request_body::<LocalApiServerLogsRequest>(req).await?;
+          Ok(Routes::Api(ApiRoutes::ApiServers(ApiServersRoutes::Logs(
+            req_body,
+          ))))
+        }
       },
       ApiPathRoutes::Shutdown => Ok(Routes::Api(ApiRoutes::Shutdown)),
       ApiPathRoutes::FrontendLatest => Ok(Routes::Api(ApiRoutes::FrontendLatest)),

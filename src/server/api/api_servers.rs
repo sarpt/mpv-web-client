@@ -1,5 +1,8 @@
-use hyper::Response;
+use futures::StreamExt;
+use http_body_util::{StreamBody, combinators::BoxBody};
+use hyper::{Response, body::Frame, header::HeaderValue};
 use serde::{Deserialize, Serialize};
+use tokio_util::io::ReaderStream;
 
 use crate::{
   api_servers::{ApiServersService, ServerArguments},
@@ -59,6 +62,48 @@ pub async fn stop_local_server(
     }
     Err(err) => {
       let response = error_json_response(format!("could not stop api instance: {err}"))?;
+      Ok(response)
+    }
+  }
+}
+
+#[derive(Deserialize)]
+enum LogVariant {
+  Stdout,
+  Stderr,
+}
+
+#[derive(Deserialize)]
+pub struct LocalApiServerLogsRequest {
+  name: String,
+  variant: LogVariant,
+}
+
+pub async fn get_logs_request(
+  req: LocalApiServerLogsRequest,
+  servers_service: &mut ApiServersService,
+) -> ServiceResponse {
+  match servers_service.get_logs_readers(&req.name).await {
+    Ok((stdout, stderr)) => {
+      let reader = match req.variant {
+        LogVariant::Stdout => stdout,
+        LogVariant::Stderr => stderr,
+      };
+
+      let reader_stream = ReaderStream::new(reader).map(|chunk| match chunk {
+        Ok(bytes) => Ok(Frame::data(bytes)),
+        Err(err) => Err(Box::new(err).into()),
+      });
+
+      let mut response = Response::new(BoxBody::new(StreamBody::new(reader_stream)));
+      response
+        .headers_mut()
+        .append("Content-Type", HeaderValue::from_str("text/plain").unwrap());
+
+      Ok(response)
+    }
+    Err(err) => {
+      let response = error_json_response(format!("could not get logs: {err}"))?;
       Ok(response)
     }
   }

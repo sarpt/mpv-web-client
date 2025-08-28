@@ -14,7 +14,7 @@ use nix::{
 };
 use tokio::{
   fs::{File, OpenOptions},
-  io::BufWriter,
+  io::{BufReader, BufWriter},
   process::{Child, Command},
   select, spawn,
   task::JoinHandle,
@@ -81,12 +81,9 @@ impl ApiServersService {
     let mut stdout = handle.stdout.take().unwrap();
     let mut stderr = handle.stderr.take().unwrap();
 
-    let mut stdout_file_writer = self
-      .get_stream_file_writer(&format!("mwa_{}_{}_stdout", &name, server_args.port))
-      .await?;
-    let mut stderr_file_writer = self
-      .get_stream_file_writer(&format!("mwa_{}_{}_stderr", &name, server_args.port))
-      .await?;
+    let (stdout_name, stderr_name) = Self::get_output_stream_filenames(&name);
+    let mut stdout_file_writer = self.get_stream_file_writer(&stdout_name).await?;
+    let mut stderr_file_writer = self.get_stream_file_writer(&stderr_name).await?;
     let join_handle = spawn(async move {
       let stdout_fut = tokio::io::copy(&mut stdout, &mut stdout_file_writer);
       let stderr_fut = tokio::io::copy(&mut stderr, &mut stderr_file_writer);
@@ -103,6 +100,21 @@ impl ApiServersService {
     self.instances.insert(name, instance);
 
     Ok(())
+  }
+
+  pub async fn get_logs_readers(
+    &self,
+    name: &str,
+  ) -> Result<(BufReader<File>, BufReader<File>), String> {
+    if !self.instances.contains_key(name) {
+      return Err(format!("No api server instance with name {name} exists"));
+    }
+
+    let (stdout_filename, stderr_filename) = Self::get_output_stream_filenames(name);
+    Ok((
+      self.get_stream_file_reader(&stdout_filename).await?,
+      self.get_stream_file_reader(&stderr_filename).await?,
+    ))
   }
 
   pub fn server_instances(&'_ self) -> Iter<'_, String, ApiServerInstance> {
@@ -139,6 +151,13 @@ impl ApiServersService {
     Ok(())
   }
 
+  fn get_output_stream_filenames(name: &str) -> (String, String) {
+    (
+      format!("mwa_{}_stdout", name),
+      format!("mwa_{}_stderr", name),
+    )
+  }
+
   async fn get_stream_file_writer(&self, filename: &str) -> Result<BufWriter<File>, String> {
     let mut path = self.logs_dir.clone();
     path.push(filename);
@@ -157,5 +176,25 @@ impl ApiServersService {
       })?;
 
     Ok(BufWriter::new(target_file))
+  }
+
+  async fn get_stream_file_reader(&self, filename: &str) -> Result<BufReader<File>, String> {
+    let mut path = self.logs_dir.clone();
+    path.push(filename);
+
+    let target_file = OpenOptions::default()
+      .create(false)
+      .read(true)
+      .write(false)
+      .open(&path)
+      .await
+      .map_err(|err| {
+        format!(
+          "could not open file for stdout writing {}: {err}",
+          &path.to_string_lossy()
+        )
+      })?;
+
+    Ok(BufReader::new(target_file))
   }
 }
