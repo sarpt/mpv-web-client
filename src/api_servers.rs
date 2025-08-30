@@ -7,7 +7,7 @@ use std::{
 };
 
 use futures::future::{join, join_all};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use nix::{
   sys::signal::{self, Signal},
   unistd::Pid,
@@ -20,6 +20,8 @@ use tokio::{
   task::JoinHandle,
   time::sleep,
 };
+
+use crate::common::tarflate::compress_files;
 
 pub struct ApiServerInstance {
   pub local: bool,
@@ -127,19 +129,20 @@ impl ApiServersService {
         debug!("finished writing all streams from api servers")
       },
       _ = sleep(Duration::from_secs(shutdown_timeout.into())) => {
-        warn!("forcing shutdown due to waiting for all streams took longer than {shutdown_timeout} seconds")
+        warn!("forcing shutdown due to timeout on waiting for all streams of {shutdown_timeout} seconds")
       }
     }
   }
 
   pub async fn stop(&mut self, name: String) -> Result<(), String> {
     let mut instance = self.instances.remove(&name).ok_or(format!(
-      "could not find api server instance with name {name}"
+      "could not find api server instance with name {}",
+      &name
     ))?;
     let id = instance
       .handle
       .id()
-      .ok_or(format!("instance with name {name} has already finished"))?;
+      .ok_or(format!("instance with name {} has already finished", &name))?;
 
     signal::kill(Pid::from_raw(id as i32), Signal::SIGTERM).unwrap();
     let result = instance
@@ -147,7 +150,33 @@ impl ApiServersService {
       .wait()
       .await
       .map_err(|err| format!("could not await on instance closure: {err}"))?;
-    info!("instance pid: {id}; name: {name} closed with result: {result}");
+    info!(
+      "instance pid: {id}; name: {} closed with result: {result}",
+      &name
+    );
+    let archive_result = self.archive_logs(&name).await;
+    if let Err(archive_err) = archive_result {
+      error!("could not archive logs for {}: {archive_err}", &name);
+      return Err(archive_err);
+    }
+
+    Ok(())
+  }
+
+  async fn archive_logs(&self, name: &str) -> Result<(), String> {
+    let (stdout, stderr) = Self::get_output_stream_filenames(name);
+    let mut stdout_path = PathBuf::from(&self.logs_dir.clone());
+    stdout_path.push(stdout);
+    let mut stderr_path = PathBuf::from(&self.logs_dir.clone());
+    stderr_path.push(stderr);
+    let mut archive_path = self.logs_dir.clone();
+    archive_path.push(format!("{}_logs_archive.tar.gz", &name));
+
+    spawn(async move { compress_files(&archive_path, &[stdout_path, stderr_path]) })
+      .await
+      .map_err(|err| format!("could not join spawned compression task: {err}"))?
+      .map_err(|reason| format!("could not compress archive: {reason}"))?;
+
     Ok(())
   }
 
