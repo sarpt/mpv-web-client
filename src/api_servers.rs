@@ -13,7 +13,7 @@ use nix::{
   unistd::Pid,
 };
 use tokio::{
-  fs::{File, OpenOptions},
+  fs::{File, OpenOptions, remove_file},
   io::{BufReader, BufWriter},
   process::{Child, Command},
   select, spawn,
@@ -172,10 +172,18 @@ impl ApiServersService {
     let mut archive_path = self.logs_dir.clone();
     archive_path.push(format!("{}_logs_archive.tar.gz", &name));
 
-    spawn(async move { compress_files(&archive_path, &[stdout_path, stderr_path]) })
+    let paths_to_compress = [stdout_path.clone(), stderr_path.clone()];
+    spawn(async move { compress_files(&archive_path, &paths_to_compress) })
       .await
       .map_err(|err| format!("could not join spawned compression task: {err}"))?
       .map_err(|reason| format!("could not compress archive: {reason}"))?;
+
+    remove_file(&stdout_path)
+      .await
+      .map_err(|err| format!("could not remove stdout output: {err}"))?;
+    remove_file(&stderr_path)
+      .await
+      .map_err(|err| format!("could not remove stderr output: {err}"))?;
 
     Ok(())
   }

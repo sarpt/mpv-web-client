@@ -1,6 +1,6 @@
 use flate2::{Compression, bufread::GzEncoder};
 use std::{
-  fs::OpenOptions,
+  fs::{OpenOptions, remove_file},
   io::{BufReader, BufWriter, Seek, copy},
   path::{Path, PathBuf},
 };
@@ -10,14 +10,14 @@ pub fn compress_files<T>(out: &T, src_paths: &[T]) -> Result<(), String>
 where
   T: AsRef<Path>,
 {
-  let mut temp_tar_file = PathBuf::from(out.as_ref());
-  temp_tar_file.set_extension("temp");
+  let mut temp_tar_file_path = PathBuf::from(out.as_ref());
+  temp_tar_file_path.set_extension("temp");
   let mut temp_tar_file = OpenOptions::new()
     .create(true)
     .truncate(true)
     .read(true)
     .write(true)
-    .open(&temp_tar_file)
+    .open(&temp_tar_file_path)
     .map_err(|err| format!("could not open file for stdout writing: {err}",))?;
   let mut writer = BufWriter::new(&temp_tar_file);
   let mut archive_builder = Builder::new(&mut writer);
@@ -64,6 +64,9 @@ where
       &target_archive_path.to_string_lossy()
     )
   })?;
+
+  remove_file(temp_tar_file_path)
+    .map_err(|err| format!("could not remove temp tar file: {err}"))?;
 
   Ok(())
 }
