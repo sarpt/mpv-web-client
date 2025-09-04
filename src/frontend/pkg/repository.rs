@@ -98,7 +98,7 @@ impl PackagesRepository {
           "issue with joining on blocking task for frontend extraction: {e}"
         ))
       })?
-      .map_err(FrontendPkgErr::PkgInvalid)?;
+      .map_err(FrontendPkgErr::PkgUnpackErr)?;
     let temp_version = self.check_temp().await?.manifest.version_info.version;
 
     match self.check_temp_pkg_manifest_against_installed_one().await {
@@ -198,16 +198,20 @@ fn copy_frontend_pkg_to_home(version: &Semver) -> Result<(), FrontendPkgErr> {
   install_frontend_dir.push(version.to_string());
 
   for entry_result in walkdir::WalkDir::new(&frontend_temp_dir) {
-    let entry = match entry_result {
-      Ok(e) => e,
-      Err(err) => return Err(FrontendPkgErr::PkgUnpackErr(err.into())),
-    };
+    let entry = entry_result.map_err(|err| {
+      FrontendPkgErr::PkgInstallFailed(format!("could not walk through frontend temp dir: {err}"))
+    })?;
 
     let mut tgt_path = install_frontend_dir.clone();
     let stripped_path = entry.path().strip_prefix(&frontend_temp_dir).unwrap();
     tgt_path.push(stripped_path);
     if entry.file_type().is_dir() {
-      create_dir_all(tgt_path).map_err(FrontendPkgErr::PkgUnpackErr)?;
+      create_dir_all(&tgt_path).map_err(|err| {
+        FrontendPkgErr::PkgInstallFailed(format!(
+          "could not create install dir {}: {err}",
+          tgt_path.to_string_lossy()
+        ))
+      })?;
     } else if entry.file_type().is_file() {
       std::fs::copy(entry.path(), tgt_path).map_err(FrontendPkgErr::HomeDirInaccessible)?;
     }

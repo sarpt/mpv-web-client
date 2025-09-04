@@ -147,7 +147,7 @@ async fn check_for_newer_remote_release(
 pub enum FrontendPkgErr {
   EntrypointNotFound(String),
   PkgInstallFailed(String),
-  PkgUnpackErr(std::io::Error),
+  PkgUnpackErr(String),
   PkgInvalid(String),
   PkgOutdated(String, String),
   ManifestInvalid(String),

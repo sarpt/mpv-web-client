@@ -29,7 +29,12 @@ where
     .write(false)
     .open(&path)
     .await
-    .map_err(FrontendPkgErr::PkgUnpackErr)?;
+    .map_err(|err| {
+      FrontendPkgErr::ManifestInvalid(format!(
+        "could not open manifest path {}: {err}",
+        path.as_ref().to_string_lossy()
+      ))
+    })?;
 
   let mut toml_content = String::new();
   package_file
