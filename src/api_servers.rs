@@ -12,6 +12,7 @@ use nix::{
   sys::signal::{self, Signal},
   unistd::Pid,
 };
+use rand::{Rng, rng};
 use tokio::{
   fs::{File, OpenOptions, remove_file},
   io::{BufReader, BufWriter},
@@ -20,17 +21,19 @@ use tokio::{
   task::JoinHandle,
   time::sleep,
 };
+use uuid::{Builder, Uuid};
 
 use crate::common::tarflate::compress_files;
 
 pub struct ApiServerInstance {
+  pub name: String,
   pub local: bool,
   pub address: String,
   handle: Child,
 }
 
 pub struct ApiServersService {
-  instances: HashMap<String, ApiServerInstance>,
+  instances: HashMap<Uuid, ApiServerInstance>,
   logs_dir: PathBuf,
   logs_join_handles: Vec<JoinHandle<()>>,
 }
@@ -60,7 +63,7 @@ impl ApiServersService {
     &mut self,
     name: String,
     server_args: &ServerArguments<'a>,
-  ) -> Result<(), String> {
+  ) -> Result<Uuid, String> {
     let mut cmd = Command::new(LOCAL_SERVER_BIN_NAME);
 
     let address = format!("{}:{}", LOCAL_SERVER_IP_ADDR, server_args.port);
@@ -83,7 +86,8 @@ impl ApiServersService {
     let mut stdout = handle.stdout.take().unwrap();
     let mut stderr = handle.stderr.take().unwrap();
 
-    let (stdout_name, stderr_name) = Self::get_output_stream_filenames(&name);
+    let uuid = Builder::from_random_bytes(rng().random()).into_uuid();
+    let (stdout_name, stderr_name) = Self::get_output_stream_filenames(&uuid);
     let mut stdout_file_writer = self.get_stream_file_writer(&stdout_name).await?;
     let mut stderr_file_writer = self.get_stream_file_writer(&stderr_name).await?;
     let join_handle = spawn(async move {
@@ -95,31 +99,32 @@ impl ApiServersService {
     self.logs_join_handles.push(join_handle);
 
     let instance = ApiServerInstance {
+      name,
       local: true,
       address,
       handle,
     };
-    self.instances.insert(name, instance);
+    self.instances.insert(uuid, instance);
 
-    Ok(())
+    Ok(uuid)
   }
 
   pub async fn get_logs_readers(
     &self,
-    name: &str,
+    uuid: &Uuid,
   ) -> Result<(BufReader<File>, BufReader<File>), String> {
-    if !self.instances.contains_key(name) {
-      return Err(format!("No api server instance with name {name} exists"));
+    if !self.instances.contains_key(uuid) {
+      return Err(format!("No api server instance with uuid {uuid} exists"));
     }
 
-    let (stdout_filename, stderr_filename) = Self::get_output_stream_filenames(name);
+    let (stdout_filename, stderr_filename) = Self::get_output_stream_filenames(uuid);
     Ok((
       self.get_stream_file_reader(&stdout_filename).await?,
       self.get_stream_file_reader(&stderr_filename).await?,
     ))
   }
 
-  pub fn server_instances(&'_ self) -> Iter<'_, String, ApiServerInstance> {
+  pub fn server_instances(&'_ self) -> Iter<'_, Uuid, ApiServerInstance> {
     self.instances.iter()
   }
 
@@ -134,15 +139,15 @@ impl ApiServersService {
     }
   }
 
-  pub async fn stop(&mut self, name: String) -> Result<(), String> {
-    let mut instance = self.instances.remove(&name).ok_or(format!(
-      "could not find api server instance with name {}",
-      &name
+  pub async fn stop(&mut self, uuid: &Uuid) -> Result<(), String> {
+    let mut instance = self.instances.remove(uuid).ok_or(format!(
+      "could not find api server instance with uuid {}",
+      &uuid
     ))?;
     let id = instance
       .handle
       .id()
-      .ok_or(format!("instance with name {} has already finished", &name))?;
+      .ok_or(format!("instance with uuid {} has already finished", uuid))?;
 
     signal::kill(Pid::from_raw(id as i32), Signal::SIGTERM).unwrap();
     let result = instance
@@ -151,26 +156,26 @@ impl ApiServersService {
       .await
       .map_err(|err| format!("could not await on instance closure: {err}"))?;
     info!(
-      "instance pid: {id}; name: {} closed with result: {result}",
-      &name
+      "instance pid: {id}; uuid: {} closed with result: {result}",
+      &uuid
     );
-    let archive_result = self.archive_logs(&name).await;
+    let archive_result = self.archive_logs(uuid).await;
     if let Err(archive_err) = archive_result {
-      error!("could not archive logs for {}: {archive_err}", &name);
+      error!("could not archive logs for {}: {archive_err}", uuid);
       return Err(archive_err);
     }
 
     Ok(())
   }
 
-  async fn archive_logs(&self, name: &str) -> Result<(), String> {
-    let (stdout, stderr) = Self::get_output_stream_filenames(name);
+  async fn archive_logs(&self, uuid: &Uuid) -> Result<(), String> {
+    let (stdout, stderr) = Self::get_output_stream_filenames(uuid);
     let mut stdout_path = PathBuf::from(&self.logs_dir.clone());
     stdout_path.push(stdout);
     let mut stderr_path = PathBuf::from(&self.logs_dir.clone());
     stderr_path.push(stderr);
     let mut archive_path = self.logs_dir.clone();
-    archive_path.push(format!("{}_logs_archive.tar.gz", &name));
+    archive_path.push(format!("{}_logs_archive.tar.gz", uuid));
 
     let paths_to_compress = [stdout_path.clone(), stderr_path.clone()];
     spawn(async move { compress_files(&archive_path, &paths_to_compress) })
@@ -188,10 +193,10 @@ impl ApiServersService {
     Ok(())
   }
 
-  fn get_output_stream_filenames(name: &str) -> (String, String) {
+  fn get_output_stream_filenames(uuid: &Uuid) -> (String, String) {
     (
-      format!("mwa_{}_stdout", name),
-      format!("mwa_{}_stderr", name),
+      format!("mwa_{}_stdout", uuid),
+      format!("mwa_{}_stderr", uuid),
     )
   }
 

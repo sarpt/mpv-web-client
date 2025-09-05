@@ -3,6 +3,7 @@ use http_body_util::{StreamBody, combinators::BoxBody};
 use hyper::{Response, body::Frame, header::HeaderValue};
 use serde::{Deserialize, Serialize};
 use tokio_util::io::ReaderStream;
+use uuid::Uuid;
 
 use crate::{
   api_servers::{ApiServersService, ServerArguments},
@@ -15,6 +16,11 @@ pub struct LocalApiServerSpawnRequest {
   port: Option<u16>,
   dir: Vec<String>,
   watch_dir: Option<bool>,
+}
+
+#[derive(Serialize)]
+pub struct LocalApiServerSpawnResponse<'a> {
+  uuid: &'a Uuid,
 }
 
 const DEFAULT_LOCAL_SERVER_PORT: u16 = 3001;
@@ -35,8 +41,9 @@ pub async fn spawn_local_server(
   };
 
   match servers_service.spawn(req.name, &server_args).await {
-    Ok(()) => {
-      let response = Response::new(empty_body());
+    Ok(uuid) => {
+      let body = serde_json::to_string(&LocalApiServerSpawnResponse { uuid: &uuid })?;
+      let response = json_response(body);
       Ok(response)
     }
     Err(err) => {
@@ -48,14 +55,14 @@ pub async fn spawn_local_server(
 
 #[derive(Deserialize)]
 pub struct LocalApiServerStopRequest {
-  name: String,
+  uuid: Uuid,
 }
 
 pub async fn stop_local_server(
   req: LocalApiServerStopRequest,
   servers_service: &mut ApiServersService,
 ) -> ServiceResponse {
-  match servers_service.stop(req.name).await {
+  match servers_service.stop(&req.uuid).await {
     Ok(()) => {
       let response = Response::new(empty_body());
       Ok(response)
@@ -75,7 +82,7 @@ enum LogVariant {
 
 #[derive(Deserialize)]
 pub struct LocalApiServerLogsRequest {
-  name: String,
+  uuid: Uuid,
   variant: LogVariant,
 }
 
@@ -83,7 +90,7 @@ pub async fn get_logs_request(
   req: LocalApiServerLogsRequest,
   servers_service: &mut ApiServersService,
 ) -> ServiceResponse {
-  match servers_service.get_logs_readers(&req.name).await {
+  match servers_service.get_logs_readers(&req.uuid).await {
     Ok((stdout, stderr)) => {
       let reader = match req.variant {
         LogVariant::Stdout => stdout,
@@ -114,6 +121,7 @@ pub struct ApiServerInstance<'a> {
   pub local: bool,
   pub address: &'a str,
   pub name: &'a str,
+  pub uuid: &'a Uuid,
 }
 
 #[derive(Serialize)]
@@ -124,10 +132,11 @@ pub struct ApiInstancesResponse<'a> {
 pub fn get_all_instances(servers_service: &mut ApiServersService) -> ServiceResponse {
   let instances: Vec<ApiServerInstance> = servers_service
     .server_instances()
-    .map(|(name, inst)| ApiServerInstance {
+    .map(|(uuid, inst)| ApiServerInstance {
       local: inst.local,
       address: &inst.address,
-      name,
+      name: &inst.name,
+      uuid,
     })
     .collect();
   let body = serde_json::to_string(&ApiInstancesResponse {
