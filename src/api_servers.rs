@@ -131,12 +131,23 @@ impl ApiServersService {
   pub async fn shutdown(&mut self, shutdown_timeout: u32) {
     select! {
       _ = join_all(take(&mut self.logs_join_handles)) => {
-        debug!("finished writing all streams from api servers")
-      },
+        debug!("finished writing all streams from api servers");
+        if let Err(err) = self.archive_all_instances_logs().await {
+          error!("could not archive instances logs after shutdown signal: {err}");
+        }
+      }
       _ = sleep(Duration::from_secs(shutdown_timeout.into())) => {
         warn!("forcing shutdown due to timeout on waiting for all streams of {shutdown_timeout} seconds")
       }
     }
+  }
+
+  async fn archive_all_instances_logs(&mut self) -> Result<(), String> {
+    for uuid in self.instances.keys() {
+      self.archive_logs(uuid).await?;
+    }
+
+    Ok(())
   }
 
   pub async fn stop(&mut self, uuid: &Uuid) -> Result<(), String> {
