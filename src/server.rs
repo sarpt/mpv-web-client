@@ -16,7 +16,9 @@ use tokio::time::sleep;
 
 use crate::api_servers::ApiServersService;
 use crate::frontend::pkg::repository::PackagesRepository;
-use crate::server::api::api_servers::{get_all_instances, spawn_local_server, stop_local_server};
+use crate::server::api::api_servers::{
+  get_all_instances, get_logs_request, spawn_local_server, stop_local_server,
+};
 use crate::server::api::frontend::{check_latest_frontend_release, update_frontend_package};
 use crate::server::api::management::trigger_shutdown;
 use crate::server::common::{ServiceResponse, empty_body, full_body};
@@ -135,6 +137,9 @@ where
           }
           router::ApiServersRoutes::All => {
             get_all_instances(dependencies.api_service.lock().await.deref_mut())
+          }
+          router::ApiServersRoutes::Logs(req_body) => {
+            get_logs_request(req_body, dependencies.api_service.lock().await.deref_mut()).await
           }
         },
       },

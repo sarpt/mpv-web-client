@@ -7,28 +7,33 @@ use std::{
 };
 
 use futures::future::{join, join_all};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use nix::{
   sys::signal::{self, Signal},
   unistd::Pid,
 };
+use rand::{Rng, rng};
 use tokio::{
-  fs::{File, OpenOptions},
-  io::BufWriter,
+  fs::{File, OpenOptions, remove_file},
+  io::{BufReader, BufWriter},
   process::{Child, Command},
   select, spawn,
   task::JoinHandle,
   time::sleep,
 };
+use uuid::{Builder, Uuid};
+
+use crate::common::tarflate::compress_files;
 
 pub struct ApiServerInstance {
+  pub name: String,
   pub local: bool,
   pub address: String,
   handle: Child,
 }
 
 pub struct ApiServersService {
-  instances: HashMap<String, ApiServerInstance>,
+  instances: HashMap<Uuid, ApiServerInstance>,
   logs_dir: PathBuf,
   logs_join_handles: Vec<JoinHandle<()>>,
 }
@@ -58,7 +63,7 @@ impl ApiServersService {
     &mut self,
     name: String,
     server_args: &ServerArguments<'a>,
-  ) -> Result<(), String> {
+  ) -> Result<Uuid, String> {
     let mut cmd = Command::new(LOCAL_SERVER_BIN_NAME);
 
     let address = format!("{}:{}", LOCAL_SERVER_IP_ADDR, server_args.port);
@@ -81,12 +86,10 @@ impl ApiServersService {
     let mut stdout = handle.stdout.take().unwrap();
     let mut stderr = handle.stderr.take().unwrap();
 
-    let mut stdout_file_writer = self
-      .get_stream_file_writer(&format!("mwa_{}_{}_stdout", &name, server_args.port))
-      .await?;
-    let mut stderr_file_writer = self
-      .get_stream_file_writer(&format!("mwa_{}_{}_stderr", &name, server_args.port))
-      .await?;
+    let uuid = Builder::from_random_bytes(rng().random()).into_uuid();
+    let (stdout_name, stderr_name) = Self::get_output_stream_filenames(&uuid);
+    let mut stdout_file_writer = self.get_stream_file_writer(&stdout_name).await?;
+    let mut stderr_file_writer = self.get_stream_file_writer(&stderr_name).await?;
     let join_handle = spawn(async move {
       let stdout_fut = tokio::io::copy(&mut stdout, &mut stdout_file_writer);
       let stderr_fut = tokio::io::copy(&mut stderr, &mut stderr_file_writer);
@@ -96,38 +99,66 @@ impl ApiServersService {
     self.logs_join_handles.push(join_handle);
 
     let instance = ApiServerInstance {
+      name,
       local: true,
       address,
       handle,
     };
-    self.instances.insert(name, instance);
+    self.instances.insert(uuid, instance);
 
-    Ok(())
+    Ok(uuid)
   }
 
-  pub fn server_instances(&'_ self) -> Iter<'_, String, ApiServerInstance> {
+  pub async fn get_logs_readers(
+    &self,
+    uuid: &Uuid,
+  ) -> Result<(BufReader<File>, BufReader<File>), String> {
+    if !self.instances.contains_key(uuid) {
+      return Err(format!("No api server instance with uuid {uuid} exists"));
+    }
+
+    let (stdout_filename, stderr_filename) = Self::get_output_stream_filenames(uuid);
+    Ok((
+      self.get_stream_file_reader(&stdout_filename).await?,
+      self.get_stream_file_reader(&stderr_filename).await?,
+    ))
+  }
+
+  pub fn server_instances(&'_ self) -> Iter<'_, Uuid, ApiServerInstance> {
     self.instances.iter()
   }
 
   pub async fn shutdown(&mut self, shutdown_timeout: u32) {
     select! {
       _ = join_all(take(&mut self.logs_join_handles)) => {
-        debug!("finished writing all streams from api servers")
-      },
+        debug!("finished writing all streams from api servers");
+        if let Err(err) = self.archive_all_instances_logs().await {
+          error!("could not archive instances logs after shutdown signal: {err}");
+        }
+      }
       _ = sleep(Duration::from_secs(shutdown_timeout.into())) => {
-        warn!("forcing shutdown due to waiting for all streams took longer than {shutdown_timeout} seconds")
+        warn!("forcing shutdown due to timeout on waiting for all streams of {shutdown_timeout} seconds")
       }
     }
   }
 
-  pub async fn stop(&mut self, name: String) -> Result<(), String> {
-    let mut instance = self.instances.remove(&name).ok_or(format!(
-      "could not find api server instance with name {name}"
+  async fn archive_all_instances_logs(&mut self) -> Result<(), String> {
+    for uuid in self.instances.keys() {
+      self.archive_logs(uuid).await?;
+    }
+
+    Ok(())
+  }
+
+  pub async fn stop(&mut self, uuid: &Uuid) -> Result<(), String> {
+    let mut instance = self.instances.remove(uuid).ok_or(format!(
+      "could not find api server instance with uuid {}",
+      &uuid
     ))?;
     let id = instance
       .handle
       .id()
-      .ok_or(format!("instance with name {name} has already finished"))?;
+      .ok_or(format!("instance with uuid {} has already finished", uuid))?;
 
     signal::kill(Pid::from_raw(id as i32), Signal::SIGTERM).unwrap();
     let result = instance
@@ -135,8 +166,49 @@ impl ApiServersService {
       .wait()
       .await
       .map_err(|err| format!("could not await on instance closure: {err}"))?;
-    info!("instance pid: {id}; name: {name} closed with result: {result}");
+    info!(
+      "instance pid: {id}; uuid: {} closed with result: {result}",
+      &uuid
+    );
+    let archive_result = self.archive_logs(uuid).await;
+    if let Err(archive_err) = archive_result {
+      error!("could not archive logs for {}: {archive_err}", uuid);
+      return Err(archive_err);
+    }
+
     Ok(())
+  }
+
+  async fn archive_logs(&self, uuid: &Uuid) -> Result<(), String> {
+    let (stdout, stderr) = Self::get_output_stream_filenames(uuid);
+    let mut stdout_path = PathBuf::from(&self.logs_dir.clone());
+    stdout_path.push(stdout);
+    let mut stderr_path = PathBuf::from(&self.logs_dir.clone());
+    stderr_path.push(stderr);
+    let mut archive_path = self.logs_dir.clone();
+    archive_path.push(format!("{}_logs_archive.tar.gz", uuid));
+
+    let paths_to_compress = [stdout_path.clone(), stderr_path.clone()];
+    spawn(async move { compress_files(&archive_path, &paths_to_compress) })
+      .await
+      .map_err(|err| format!("could not join spawned compression task: {err}"))?
+      .map_err(|reason| format!("could not compress archive: {reason}"))?;
+
+    remove_file(&stdout_path)
+      .await
+      .map_err(|err| format!("could not remove stdout output: {err}"))?;
+    remove_file(&stderr_path)
+      .await
+      .map_err(|err| format!("could not remove stderr output: {err}"))?;
+
+    Ok(())
+  }
+
+  fn get_output_stream_filenames(uuid: &Uuid) -> (String, String) {
+    (
+      format!("mwa_{}_stdout", uuid),
+      format!("mwa_{}_stderr", uuid),
+    )
   }
 
   async fn get_stream_file_writer(&self, filename: &str) -> Result<BufWriter<File>, String> {
@@ -157,5 +229,25 @@ impl ApiServersService {
       })?;
 
     Ok(BufWriter::new(target_file))
+  }
+
+  async fn get_stream_file_reader(&self, filename: &str) -> Result<BufReader<File>, String> {
+    let mut path = self.logs_dir.clone();
+    path.push(filename);
+
+    let target_file = OpenOptions::default()
+      .create(false)
+      .read(true)
+      .write(false)
+      .open(&path)
+      .await
+      .map_err(|err| {
+        format!(
+          "could not open file for stdout writing {}: {err}",
+          &path.to_string_lossy()
+        )
+      })?;
+
+    Ok(BufReader::new(target_file))
   }
 }
